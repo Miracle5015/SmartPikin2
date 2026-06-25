@@ -1,0 +1,6 @@
+{
+  "name": "Smart Pikin",
+  "description": "An AI-powered kids reading app where children learn to read and pronounce with confidence through personalized books and real-time pronunciation feedback.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

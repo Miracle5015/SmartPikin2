@@ -1,0 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fredoka One", cursive, sans-serif;
+
+  --color-sky-pikin: #39BFEF;
+  --color-sun-pikin: #F7C631;
+  --color-leaf-pikin: #4DC97E;
+  --color-coral-pikin: #FF6B52;
+  --color-navy-pikin: #1A3A5C;
+  --color-soft-pikin: #F0F9FF;
+}
