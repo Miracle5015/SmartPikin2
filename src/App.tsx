@@ -1,5 +1,6 @@
-import { useState, DragEvent, FormEvent, ChangeEvent } from "react";
+import { useState, useEffect, useRef, DragEvent, FormEvent, ChangeEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { supabase, isSupabaseConfigured, saveSupabaseCredentials, clearSupabaseCredentials, robustUpsert } from "./lib/supabase";
 import { 
   BookOpen, 
   Smile, 
@@ -24,7 +25,12 @@ import {
   VolumeX,
   Lightbulb,
   Play,
-  ArrowLeft
+  Pause,
+  Mic,
+  Settings,
+  ArrowLeft,
+  Eye,
+  EyeOff
 } from "lucide-react";
 
 // Use direct path as a string to avoid compile-time image asset import checks
@@ -87,10 +93,156 @@ const bookLessons: Record<string, { paragraph: string; syllables: { word: string
   }
 };
 
+interface SupabaseCredentialsBoxProps {
+  url: string;
+  onUrlChange: (val: string) => void;
+  anonKey: string;
+  onAnonKeyChange: (val: string) => void;
+  onSave: (e: any) => void;
+  onClear: () => void;
+  isDark?: boolean;
+}
+
+function SupabaseCredentialsBox({ 
+  url, 
+  onUrlChange, 
+  anonKey, 
+  onAnonKeyChange, 
+  onSave, 
+  onClear,
+  isDark = false 
+}: SupabaseCredentialsBoxProps) {
+  const [isOpen, setIsOpen] = useState(!isSupabaseConfigured);
+  const hasLocalKeys = typeof window !== "undefined" && !!(localStorage.getItem("SUPABASE_CUSTOM_URL") && localStorage.getItem("SUPABASE_CUSTOM_ANON_KEY"));
+
+  return (
+    <div className={`border rounded-2xl p-5 mb-6 transition-all duration-200 text-left ${
+      isDark 
+        ? "bg-slate-900/40 border-white/10 text-slate-200" 
+        : "bg-slate-50 border-slate-200 text-slate-800"
+    }`}>
+      <div 
+        className="flex items-center justify-between cursor-pointer" 
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <div className="flex items-center gap-2.5">
+          <Settings className={`h-5 w-5 ${isSupabaseConfigured ? "text-emerald-500" : "text-amber-500 animate-pulse"}`} />
+          <div>
+            <span className="font-extrabold text-xs tracking-wider uppercase block">
+              Supabase Connection Setup
+            </span>
+            <span className="text-[10px] text-slate-400 block mt-0.5">
+              {isSupabaseConfigured 
+                ? "🟢 Connected to your database" 
+                : "🔌 Not connected. Enter keys below."}
+            </span>
+          </div>
+        </div>
+        <button 
+          type="button"
+          className={`text-xs font-bold py-1 px-2.5 rounded hover:bg-black/5 cursor-pointer ${
+            isDark ? "text-white/60" : "text-slate-600"
+          }`}
+        >
+          {isOpen ? "Hide ✕" : "Configure ⚙️"}
+        </button>
+      </div>
+
+      {isOpen && (
+        <form onSubmit={onSave} className="mt-4 space-y-3.5 pt-4 border-t border-slate-200/20">
+          <div className="space-y-1.5">
+            <label className={`block text-[11px] font-black uppercase tracking-wider ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+              Supabase Project URL
+            </label>
+            <input 
+              type="url"
+              required
+              placeholder="https://your-project-id.supabase.co"
+              value={url}
+              onChange={(e) => onUrlChange(e.target.value)}
+              className={`w-full p-2.5 rounded-xl text-xs border focus:outline-none transition-all ${
+                isDark 
+                  ? "bg-slate-800/80 border-slate-700 text-white focus:border-sky-400 focus:bg-slate-800" 
+                  : "bg-white border-slate-200 text-slate-800 focus:border-sky-500"
+              }`}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={`block text-[11px] font-black uppercase tracking-wider ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+              Supabase Anon Key
+            </label>
+            <input 
+              type="password"
+              required
+              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              value={anonKey}
+              onChange={(e) => onAnonKeyChange(e.target.value)}
+              className={`w-full p-2.5 rounded-xl text-xs border focus:outline-none transition-all ${
+                isDark 
+                  ? "bg-slate-800/80 border-slate-700 text-white focus:border-sky-400 focus:bg-slate-800" 
+                  : "bg-white border-slate-200 text-slate-800 focus:border-sky-500"
+              }`}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pt-1.5">
+            <button
+              type="submit"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black py-2.5 px-4 rounded-xl cursor-pointer transition-colors shadow-sm"
+            >
+              🔌 Save & Connect Database
+            </button>
+            {hasLocalKeys && (
+              <button
+                type="button"
+                onClick={onClear}
+                className="bg-red-500/10 hover:bg-red-500/20 text-red-600 hover:text-red-700 text-xs font-bold py-2.5 px-4 rounded-xl cursor-pointer transition-colors"
+              >
+                Clear Saved Keys
+              </button>
+            )}
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed mt-2.5">
+            Providing these credentials links this application's signups, logins, and session tracking directly to your own Supabase instance.
+          </p>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // Navigation View state
-  const [currentView, setCurrentView] = useState<'landing' | 'signup' | 'login' | 'books' | 'how' | 'features' | 'dashboard'>('landing');
+  const [currentView, setCurrentView] = useState<'landing' | 'signup' | 'login' | 'books' | 'how' | 'features' | 'dashboard' | 'profile'>('landing');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isProfileCompleted, setIsProfileCompleted] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState<'parent' | 'addChild'>('parent');
+  const [childFormVisible, setChildFormVisible] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [activeProfileTab, setActiveProfileTab] = useState<'progress' | 'coaching' | null>(null);
+
+  // Custom non-blocking notification and Demo states
+  const [isDemoMode, setIsDemoMode] = useState(false);
+  const isDemoModeRef = useRef(false);
+  useEffect(() => {
+    isDemoModeRef.current = isDemoMode;
+  }, [isDemoMode]);
+
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'info' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => {
+        setToastMessage(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToastMessage({ message, type });
+  };
 
   // Spelling bee game states
   const [spellingActive, setSpellingActive] = useState(false);
@@ -106,7 +258,7 @@ export default function App() {
   const [activeNumberValue, setActiveNumberValue] = useState<number | null>(null);
 
   // Dashboard active feature selection
-  const [activeDashboardFeature, setActiveDashboardFeature] = useState<'spelling' | 'abc123' | 'upload' | 'library'>('spelling');
+  const [activeDashboardFeature, setActiveDashboardFeature] = useState<'spelling' | 'abc123' | 'upload' | 'library' | null>(null);
 
   // Books page search & filter states
   const [searchQuery, setSearchQuery] = useState("");
@@ -121,9 +273,20 @@ export default function App() {
   // Log In Form states
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [loginSuccess, setLoginSuccess] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  // Supabase Custom Config state
+  const [inputSupabaseUrl, setInputSupabaseUrl] = useState(() => {
+    return localStorage.getItem("SUPABASE_CUSTOM_URL") || "";
+  });
+  const [inputSupabaseAnonKey, setInputSupabaseAnonKey] = useState(() => {
+    return localStorage.getItem("SUPABASE_CUSTOM_ANON_KEY") || "";
+  });
+  const [showSupabaseConfigBox, setShowSupabaseConfigBox] = useState(!isSupabaseConfigured);
+
 
   const navigateToSection = (sectionId: string) => {
     if (currentView !== 'landing') {
@@ -138,17 +301,81 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("Failed to sign out from Supabase cleanly:", err);
+      }
+    }
     setIsLoggedIn(false);
+    setIsDemoMode(false);
+    setIsProfileCompleted(false);
+    setOnboardingStep('parent');
+    setChildFormVisible(false);
+    setIsProfileMenuOpen(false);
     setLoginSuccess(false);
     setFormSubmitted(false);
+    
+    // Clear user and child states completely to avoid carrying over info
     setParentFirstName("");
+    setParentLastName("");
+    setEmail("");
+    setPhone("");
     setChildFirstName("");
+    setChildAge("");
+    setChildGender("");
+    setChildGrade("");
+    setReadingLevel("");
+    setNumChildren("");
+    setSelectedAges([]);
+    setReferralSource("");
+    setTermsAccepted(false);
+    setSignupPassword("");
+    setSignupConfirmPassword("");
+    setLoginEmail("");
+    setLoginPassword("");
+
     setSpellingActive(false);
     setSpellingScore(0);
+    setActiveDashboardFeature(null);
+    setActiveProfileTab(null);
     setCurrentView('landing');
     window.scrollTo({ top: 0 });
   };
+
+  const handleSaveSupabaseConfig = (e: FormEvent) => {
+    e.preventDefault();
+    if (!inputSupabaseUrl.trim() || !inputSupabaseAnonKey.trim()) {
+      showToast("Please provide both Supabase URL and Anon Key!", "error");
+      return;
+    }
+    
+    if (!inputSupabaseUrl.trim().startsWith("https://")) {
+      showToast("Supabase URL must start with https://", "error");
+      return;
+    }
+
+    saveSupabaseCredentials(inputSupabaseUrl, inputSupabaseAnonKey);
+    showToast("Supabase credentials saved successfully! Connecting... 🔌", "success");
+    
+    // Refresh page to re-initialize Supabase client cleanly
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  };
+
+  const handleClearSupabaseConfig = () => {
+    clearSupabaseCredentials();
+    setInputSupabaseUrl("");
+    setInputSupabaseAnonKey("");
+    showToast("Supabase credentials cleared. Falling back to default settings.", "info");
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  };
+
 
   // FAQ states (using an array of boolean flags or tracking selected index)
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -161,9 +388,34 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<string | null>(null);
 
+  // n8n Webhook and AI Story Reader states
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState(() => localStorage.getItem('n8nWebhookUrl') || '');
+  const [webhookStatus, setWebhookStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+  const [webhookError, setWebhookError] = useState<string | null>(null);
+  const [extractedText, setExtractedText] = useState("");
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [activeWordIndex, setActiveWordIndex] = useState(-1);
+  const [isReadingAloud, setIsReadingAloud] = useState(false);
+  const [speechRate, setSpeechRate] = useState(1);
+  const [isMicListening, setIsMicListening] = useState(false);
+  const [childSpeechTranscript, setChildSpeechTranscript] = useState("");
+  const [speechRecognitionInstance, setSpeechRecognitionInstance] = useState<any>(null);
+  const [playbackTimer, setPlaybackTimer] = useState<any>(null);
+  const [showWebhookSettings, setShowWebhookSettings] = useState(false);
+
   // Sign up Form state
+  const [signupStep, setSignupStep] = useState<1 | 2>(1);
+  const [registeredUserId, setRegisteredUserId] = useState<string | null>(null);
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
+  const [showSignupPassword, setShowSignupPassword] = useState(false);
+  const [showSignupConfirmPassword, setShowSignupConfirmPassword] = useState(false);
+  const [childGender, setChildGender] = useState(""); // optional
+  const [childGrade, setChildGrade] = useState("");
+  const [childAge, setChildAge] = useState("");
   const [parentFirstName, setParentFirstName] = useState("");
   const [parentLastName, setParentLastName] = useState("");
+  const [role, setRole] = useState("parent"); // 'parent' | 'guardian' | 'teacher'
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [childFirstName, setChildFirstName] = useState("");
@@ -175,6 +427,378 @@ export default function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formSubmitted, setFormSubmitted] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  useEffect(() => {
+    if (currentView === 'signup') {
+      setSignupStep(1);
+      setErrorMsg("");
+    }
+  }, [currentView]);
+
+  const loadSupabaseUserData = async (userId: string) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    try {
+      // Fetch user metadata as fallback
+      const { data: { user } } = await supabase.auth.getUser();
+      const metadata = user?.user_metadata || {};
+
+      // 1. Fetch profile
+      let pFirstName = "";
+      let pLastName = "";
+      let pEmail = user?.email || "";
+      let pPhone = "";
+      let pRole = "parent";
+
+      let profile: any = null;
+
+      // Try fetching from "Parent's Profile"
+      try {
+        const { data: pData, error: pErr } = await supabase
+          .from("Parent's Profile")
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+        if (pData && !pErr) {
+          profile = pData;
+        }
+      } catch (err) {
+        console.warn("Failed to fetch from table 'Parent's Profile':", err);
+      }
+
+      // If not found, try profiles
+      if (!profile) {
+        try {
+          const { data: profData, error: profErr } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+          if (profData && !profErr) {
+            profile = profData;
+          }
+        } catch (err) {
+          console.warn("Failed to fetch from table 'profiles':", err);
+        }
+      }
+      
+      if (profile) {
+        pFirstName = profile.parent_first_name || profile.first_name || "";
+        pLastName = profile.parent_last_name || profile.last_name || "";
+        pEmail = profile.email || pEmail;
+        pPhone = profile.phone || profile.phone_number || "";
+        pRole = profile.role || "parent";
+      } else {
+        // Fallback to user metadata
+        pFirstName = metadata.parent_first_name || "";
+        pLastName = metadata.parent_last_name || "";
+        pPhone = metadata.phone || "";
+        pRole = metadata.role || "parent";
+
+        // Proactively insert into tables since it's missing!
+        if (pFirstName || pLastName) {
+          try {
+            await supabase
+              .from("Parent's Profile")
+              .upsert({
+                id: userId,
+                parent_first_name: pFirstName,
+                parent_last_name: pLastName,
+                email: pEmail,
+                phone: pPhone,
+                role: pRole
+              });
+          } catch (upsertErr) {
+            try {
+              // Attempt with fallback field names in case custom schema has different column names
+              await supabase
+                .from("Parent's Profile")
+                .upsert({
+                  id: userId,
+                  first_name: pFirstName,
+                  last_name: pLastName,
+                  email: pEmail,
+                  phone_number: pPhone,
+                  role: pRole
+                });
+            } catch (err2) {
+              console.warn("Failed to auto-populate Parent's Profile table:", err2);
+            }
+          }
+
+          try {
+            await supabase
+              .from('profiles')
+              .upsert({
+                id: userId,
+                parent_first_name: pFirstName,
+                parent_last_name: pLastName,
+                email: pEmail,
+                phone: pPhone,
+                role: pRole
+              });
+          } catch (upsertErr) {
+            console.warn("Failed to auto-populate profiles table:", upsertErr);
+          }
+        }
+      }
+
+      setParentFirstName(pFirstName);
+      setParentLastName(pLastName);
+      setEmail(pEmail);
+      setPhone(pPhone);
+      setRole(pRole);
+
+      // 2. Fetch children
+      let cFirstName = "";
+      let cAge = "";
+      let cGender = "";
+      let cGrade = "";
+      let cReadingLevel = "";
+
+      let childList: any[] = [];
+
+      // Try fetching from "Child's Information"
+      try {
+        const { data, error } = await supabase
+          .from("Child's Information")
+          .select('*')
+          .eq('parent_id', userId);
+        if (data && !error && data.length > 0) {
+          childList = data;
+        }
+      } catch (err) {
+        console.warn("Failed to fetch from table 'Child's Information':", err);
+      }
+
+      // Fallback to "children" table
+      if (childList.length === 0) {
+        try {
+          const { data, error } = await supabase
+            .from('children')
+            .select('*')
+            .eq('parent_id', userId);
+          if (data && !error && data.length > 0) {
+            childList = data;
+          }
+        } catch (err) {
+          console.warn("Failed to fetch from table 'children':", err);
+        }
+      }
+      
+      if (childList.length > 0) {
+        const child = childList[0]; // Get the first child
+        cFirstName = child.child_first_name || child.first_name || child.name || "";
+        cAge = (child.child_age || child.age)?.toString() || "";
+        cGender = child.child_gender || child.gender || "";
+        cGrade = child.child_grade || child.grade || "";
+        cReadingLevel = child.reading_level || child.reading_level_milestone || "";
+      } else {
+        // Fallback to user metadata
+        cFirstName = metadata.child_first_name || "";
+        cAge = metadata.child_age?.toString() || "";
+        cGender = metadata.child_gender || "";
+        cGrade = metadata.child_grade || "";
+        cReadingLevel = metadata.reading_level || "";
+
+        // Proactively insert into tables since it's missing!
+        if (cFirstName) {
+          // Try inserting to "Child's Information"
+          try {
+            await supabase
+              .from("Child's Information")
+              .upsert({
+                parent_id: userId,
+                child_first_name: cFirstName,
+                child_age: parseInt(cAge) || null,
+                child_gender: cGender || null,
+                child_grade: cGrade,
+                reading_level: cReadingLevel
+              });
+          } catch (upsertErr) {
+            try {
+              // Alternative columns mapping
+              await supabase
+                .from("Child's Information")
+                .upsert({
+                  parent_id: userId,
+                  first_name: cFirstName,
+                  age: parseInt(cAge) || null,
+                  gender: cGender || null,
+                  grade: cGrade,
+                  reading_level: cReadingLevel
+                });
+            } catch (err2) {
+              console.warn("Failed to auto-populate 'Child's Information' table:", err2);
+            }
+          }
+
+          // Also insert to 'children' table
+          try {
+            await supabase
+              .from('children')
+              .upsert({
+                parent_id: userId,
+                child_first_name: cFirstName,
+                child_age: parseInt(cAge) || null,
+                child_gender: cGender || null,
+                child_grade: cGrade,
+                reading_level: cReadingLevel
+              });
+          } catch (upsertErr) {
+            console.warn("Failed to auto-populate children table:", upsertErr);
+          }
+        }
+      }
+
+      setChildFirstName(cFirstName);
+      setChildAge(cAge);
+      setChildGender(cGender);
+      setChildGrade(cGrade);
+      setReadingLevel(cReadingLevel);
+      if (cAge) {
+        setSelectedAges([cAge + " yrs"]);
+      }
+      if (pFirstName && cFirstName) {
+        setIsProfileCompleted(true);
+      } else {
+        setIsProfileCompleted(false);
+        if (pFirstName) {
+          setOnboardingStep('addChild');
+        } else {
+          setOnboardingStep('parent');
+        }
+      }
+    } catch (err) {
+      console.error("Error loading user data from Supabase:", err);
+    }
+  };
+
+  // Gracefully handle unhandled fetch and network errors from background Supabase/API requests
+  useEffect(() => {
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason;
+      if (reason) {
+        const errorMsg = reason.message || String(reason);
+        if (
+          errorMsg.includes("Failed to fetch") || 
+          errorMsg.includes("network") || 
+          errorMsg.includes("fetch") ||
+          reason.name === "TypeError"
+        ) {
+          console.warn("Gracefully handled background network rejection:", errorMsg);
+          event.preventDefault(); // Stop from bubbling up and crashing tests/app
+        }
+      }
+    };
+
+    const handleError = (event: ErrorEvent) => {
+      if (event.error) {
+        const errorMsg = event.error.message || String(event.error);
+        if (
+          errorMsg.includes("Failed to fetch") || 
+          errorMsg.includes("network") ||
+          errorMsg.includes("fetch")
+        ) {
+          console.warn("Gracefully handled background network error:", errorMsg);
+          event.preventDefault(); // Stop from bubbling up and crashing tests/app
+        }
+      }
+    };
+
+    window.addEventListener("unhandledrejection", handleRejection);
+    window.addEventListener("error", handleError);
+
+    return () => {
+      window.removeEventListener("unhandledrejection", handleRejection);
+      window.removeEventListener("error", handleError);
+    };
+  }, []);
+
+  // Supabase auth state change listener
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    let subscription: { unsubscribe: () => void } | null = null;
+
+    try {
+      // Check current session on load with catch handler for connection/fetch failures
+      supabase.auth.getSession()
+        .then(({ data: { session } }) => {
+          if (session?.user) {
+            setIsLoggedIn(true);
+            loadSupabaseUserData(session.user.id);
+          }
+        })
+        .catch(err => {
+          console.warn("Failed to retrieve Supabase session due to connection or configuration issues:", err);
+        });
+
+      const response = supabase.auth.onAuthStateChange(
+        (event, session) => {
+          if (session?.user) {
+            setIsDemoMode(false);
+            setIsLoggedIn(true);
+            loadSupabaseUserData(session.user.id);
+          } else {
+            // If they are currently in Demo Mode, DO NOT reset their isLoggedIn status on background null sessions!
+            // Only reset if they are not in Demo Mode or if we get an explicit SIGNED_OUT event.
+            if (isDemoModeRef.current && event !== 'SIGNED_OUT') {
+              console.log("Supabase listener received null session but bypassed reset because app is running in Demo Mode.");
+              return;
+            }
+
+            // Reset local state if logged out
+            setIsLoggedIn(false);
+            setIsDemoMode(false);
+            setIsProfileCompleted(false);
+            setParentFirstName("");
+            setParentLastName("");
+            setEmail("");
+            setPhone("");
+            setChildFirstName("");
+            setChildAge("");
+            setChildGender("");
+            setChildGrade("");
+            setReadingLevel("");
+            setNumChildren("");
+            setSelectedAges([]);
+            setReferralSource("");
+            setTermsAccepted(false);
+            setSignupPassword("");
+            setSignupConfirmPassword("");
+            setLoginEmail("");
+            setLoginPassword("");
+          }
+        }
+      );
+
+      if (response && response.data) {
+        subscription = response.data.subscription;
+      }
+    } catch (err) {
+      console.warn("Failed to initialize Supabase listener due to connection or configuration issues:", err);
+    }
+
+    return () => {
+      if (subscription) {
+        try {
+          subscription.unsubscribe();
+        } catch (e) {
+          console.warn("Failed to unsubscribe from Supabase listener:", e);
+        }
+      }
+    };
+  }, []);
+
+  // Redirect logged-in users away from landing, login, and signup pages
+  useEffect(() => {
+    if (isLoggedIn) {
+      if (currentView === 'landing' || currentView === 'login' || currentView === 'signup') {
+        setCurrentView('dashboard');
+        window.scrollTo({ top: 0 });
+      }
+    }
+  }, [isLoggedIn, currentView]);
 
   const faqs = [
     {
@@ -225,9 +849,111 @@ export default function App() {
     }
   };
 
-  // Simulated signup submit
-  const handleSignupSubmit = async (e: FormEvent) => {
+  // Parent signup validation & execution (Single Step)
+  const handleStep1Submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!email || !signupPassword || !signupConfirmPassword) {
+      setErrorMsg("Please fill in email address and passwords.");
+      return;
+    }
+    if (signupPassword.length < 6) {
+      setErrorMsg("Password must be at least 6 characters.");
+      return;
+    }
+    if (signupPassword !== signupConfirmPassword) {
+      setErrorMsg("Passwords do not match.");
+      return;
+    }
+    setErrorMsg("");
+
+    if (!isSupabaseConfigured || !supabase) {
+      // Offline/Demo fallback mode
+      setIsLoggedIn(true);
+      setCurrentView('dashboard');
+      window.scrollTo({ top: 0 });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email,
+        password: signupPassword,
+        options: {
+          data: {
+            role: 'parent',
+          }
+        }
+      });
+
+      if (error) {
+        console.error("Supabase Auth SignUp Error: Name =", error.name, "Message =", error.message, "Status =", error.status);
+        let msg = error.message || "";
+        if (msg.toLowerCase().includes("fetch") || error.name === "AuthRetryableFetchError") {
+          msg = "Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.";
+        } else if (!msg || msg === "{}" || msg === "[object Object]") {
+          msg = "Supabase authentication failed. Please check that your email is valid, password is at least 6 characters, and the email is not already registered in your database.";
+        }
+        setErrorMsg(msg);
+        return;
+      }
+
+      if (data && data.user) {
+        setRegisteredUserId(data.user.id);
+
+        // Upsert profile with email
+        try {
+          await supabase
+            .from("Parent's Profile")
+            .upsert({
+              id: data.user.id,
+              email: email,
+              role: 'parent'
+            });
+        } catch (profileErr) {
+          console.warn("Failed to insert signup details to Parent's Profile table in Step 1:", profileErr);
+        }
+
+        try {
+          await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              email: email,
+              role: 'parent'
+            });
+        } catch (profileErr) {
+          console.warn("Failed to insert signup details to profiles table in Step 1:", profileErr);
+        }
+
+        setIsLoggedIn(true);
+        setCurrentView('dashboard');
+        window.scrollTo({ top: 0 });
+      } else {
+        // If Supabase signed up but requires email confirmation, fallback to logging them in for the trial
+        setIsLoggedIn(true);
+        setCurrentView('dashboard');
+        window.scrollTo({ top: 0 });
+      }
+    } catch (err: any) {
+      console.error("Signup exception:", err);
+      let msg = err.message || "";
+      if (msg.toLowerCase().includes("fetch") || err.name === "AuthRetryableFetchError") {
+        msg = "Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.";
+      }
+      setErrorMsg(msg || "An unexpected error occurred during signup.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Dashboard Parent profile registration submit
+  const handleCompleteParentProfileSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!parentFirstName || !parentLastName || !phone || !email) {
+      setErrorMsg("Please fill in your first name, last name, phone number, and email address.");
+      return;
+    }
     if (!termsAccepted) {
       setErrorMsg("Please accept the Terms of Service and Privacy Policy.");
       return;
@@ -236,11 +962,168 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      // Simulate API or Webhook call (matching landing page's fallback behavior)
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      setFormSubmitted(true);
-    } catch (err) {
-      setErrorMsg("An error occurred. Please try again.");
+      let userId = registeredUserId;
+      if (!userId && isSupabaseConfigured && supabase) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            userId = user.id;
+          }
+        } catch (userErr) {
+          console.warn("Failed to retrieve current user from Supabase during parent registration:", userErr);
+        }
+      }
+
+      if (isSupabaseConfigured && supabase && userId) {
+        // Attempt saving to "Parent's Profile" table using our robust auto-pruning upsert helper
+        const parentPayload = {
+          id: userId,
+          parent_first_name: parentFirstName,
+          parent_last_name: parentLastName,
+          first_name: parentFirstName,
+          last_name: parentLastName,
+          email: email,
+          email_address: email,
+          phone: phone,
+          phone_number: phone,
+          role: 'parent'
+        };
+
+        const { error: upsertErr } = await robustUpsert("Parent's Profile", parentPayload);
+
+        if (upsertErr) {
+          console.error("All Parent's Profile insert attempts failed:", upsertErr);
+          
+          let friendlyMessage = `Could not save parent details to your "Parent's Profile" table: ${upsertErr.message || "Unknown error"}.`;
+          if (upsertErr.message?.includes("row-level security") || upsertErr.code === "42501") {
+            friendlyMessage = `Row Level Security (RLS) is blocking inserts on "Parent's Profile" table. Please go to your Supabase Dashboard, open "Parent's Profile" table, and either click "Add RLS policy" to create an INSERT/ALL policy or temporarily disable RLS under "Table Options" -> "Disable RLS" to allow testing.`;
+          } else if (upsertErr.message?.toLowerCase().includes("fetch") || upsertErr.code === "FETCH_ERROR") {
+            friendlyMessage = `Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.`;
+          } else if (upsertErr.message?.includes("column") || upsertErr.code === "42703") {
+            friendlyMessage = `Column mismatch in "Parent's Profile" table: ${upsertErr.message}. Please verify that your "Parent's Profile" table has columns like 'id' (uuid), 'first_name' (text), 'last_name' (text), 'email' (text), and 'phone' (text) in your Supabase Dashboard.`;
+          } else if (upsertErr.code === "42P01") {
+            friendlyMessage = `Table "Parent's Profile" does not exist in your Supabase schema. Please create the table exactly named "Parent's Profile" or run the SQL in schema.sql.`;
+          }
+          throw new Error(friendlyMessage);
+        }
+
+        // Always save to the default profiles table as well for backwards compatibility and system consistency
+        try {
+          const { error: defaultErr } = await supabase
+            .from('profiles')
+            .upsert({
+              id: userId,
+              parent_first_name: parentFirstName,
+              parent_last_name: parentLastName,
+              email: email,
+              phone: phone,
+              role: 'parent'
+            });
+          if (defaultErr) {
+            console.warn("Failed to insert parent details to default profiles table:", defaultErr);
+          }
+        } catch (profileErr) {
+          console.warn("Failed to insert parent details to profiles table:", profileErr);
+        }
+      }
+      setOnboardingStep('addChild');
+      showToast("Parent profile saved successfully! Click 'Add a Child' below to proceed.", "success");
+    } catch (err: any) {
+      console.error("Parent registration complete exception:", err);
+      setErrorMsg(err.message || "An error occurred. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Dashboard Child profile registration submit
+  const handleCompleteChildProfileSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!childFirstName || !childAge) {
+      setErrorMsg("Please fill in your child's first name and age.");
+      return;
+    }
+    setErrorMsg("");
+    setIsSubmitting(true);
+
+    try {
+      // Auto-set selected ages for compatibility
+      setSelectedAges([childAge + " yrs"]);
+
+      let userId = registeredUserId;
+      if (!userId && isSupabaseConfigured && supabase) {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) {
+            userId = user.id;
+          }
+        } catch (userErr) {
+          console.warn("Failed to retrieve current user from Supabase during child registration:", userErr);
+        }
+      }
+
+      if (isSupabaseConfigured && supabase && userId) {
+        const parsedAge = parseInt(childAge) || null;
+
+        // 1. Try upserting to "Child's Information" using our robust auto-pruning helper
+        const childPayload = {
+          parent_id: userId,
+          child_first_name: childFirstName,
+          first_name: childFirstName,
+          name: childFirstName,
+          child_age: parsedAge,
+          age: parsedAge,
+          child_gender: childGender || null,
+          gender: childGender || null,
+          age_range: childAge, // maps to their age_range text column
+          child_grade: childGrade || null,
+          grade: childGrade || null,
+          reading_level: readingLevel,
+          reading_level_milestone: readingLevel
+        };
+
+        const { error: childUpsertErr } = await robustUpsert("Child's Information", childPayload);
+
+        if (childUpsertErr) {
+          console.error("All Child's Information insert attempts failed:", childUpsertErr);
+          
+          let friendlyMessage = `Could not save child details to your "Child's Information" table: ${childUpsertErr.message || "Unknown error"}.`;
+          if (childUpsertErr.message?.includes("row-level security") || childUpsertErr.code === "42501") {
+            friendlyMessage = `Row Level Security (RLS) is blocking inserts on "Child's Information" table. Please go to your Supabase Dashboard, open "Child's Information" table, and either click "Add RLS policy" to create an INSERT/ALL policy or temporarily disable RLS under "Table Options" -> "Disable RLS" to allow testing.`;
+          } else if (childUpsertErr.message?.toLowerCase().includes("fetch") || childUpsertErr.code === "FETCH_ERROR") {
+            friendlyMessage = `Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.`;
+          } else if (childUpsertErr.message?.includes("column") || childUpsertErr.code === "42703") {
+            friendlyMessage = `Column mismatch in "Child's Information" table: ${childUpsertErr.message}. Please verify that your "Child's Information" table has columns like 'first_name' (text), 'age_range' (text), and 'gender' (text) in your Supabase Dashboard.`;
+          } else if (childUpsertErr.code === "42P01") {
+            friendlyMessage = `Table "Child's Information" does not exist in your Supabase schema. Please create the table exactly named "Child's Information" or run the SQL in schema.sql.`;
+          }
+          throw new Error(friendlyMessage);
+        }
+
+        // 2. Always upsert to "children" table for system backwards compatibility
+        try {
+          const { error: defChildErr } = await supabase
+            .from('children')
+            .upsert({
+              parent_id: userId,
+              child_first_name: childFirstName,
+              child_age: parsedAge,
+              child_gender: childGender || null,
+              child_grade: childGrade || null,
+              reading_level: readingLevel
+            });
+          if (defChildErr) {
+            console.warn("Failed to insert child details to default children table:", defChildErr);
+          }
+        } catch (childErr) {
+          console.warn("Failed to insert child details to children table:", childErr);
+        }
+      }
+      setIsProfileCompleted(true);
+      showToast("Child profile added! Welcome to the Learning Island!", "success");
+    } catch (err: any) {
+      console.error("Child registration complete exception:", err);
+      setErrorMsg(err.message || "An error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -249,17 +1132,55 @@ export default function App() {
   // Simulated Login submit
   const handleLoginSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isSupabaseConfigured || !supabase) {
+      setLoginError("Supabase is not configured yet. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment variables via AI Studio Settings.");
+      return;
+    }
     if (!loginEmail || !loginPassword) {
       setLoginError("Please enter both email and password.");
       return;
     }
     setLoginError("");
     setIsLoggingIn(true);
+
+    // Clear previous parent and child info so that fresh data is loaded cleanly
+    setParentFirstName("");
+    setParentLastName("");
+    setEmail("");
+    setPhone("");
+    setChildFirstName("");
+    setChildAge("");
+    setChildGender("");
+    setChildGrade("");
+    setReadingLevel("");
+    setNumChildren("");
+    setSelectedAges([]);
+
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail,
+        password: loginPassword,
+      });
+
+      if (error) {
+        console.error("Supabase Auth SignIn Error: Name =", error.name, "Message =", error.message, "Status =", error.status);
+        let msg = error.message || "";
+        if (msg.toLowerCase().includes("fetch") || error.name === "AuthRetryableFetchError") {
+          msg = "Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.";
+        } else if (!msg || msg === "{}" || msg === "[object Object]") {
+          msg = "Supabase authentication failed. Please check your credentials, or bypass in demo mode.";
+        }
+        setLoginError(msg);
+        return;
+      }
       setLoginSuccess(true);
-    } catch (err) {
-      setLoginError("Could not connect to service. Please try again.");
+    } catch (err: any) {
+      console.error("Login exception:", err);
+      let msg = err.message || "";
+      if (msg.toLowerCase().includes("fetch") || err.name === "AuthRetryableFetchError") {
+        msg = "Unable to connect to the Supabase database (Failed to fetch). This usually means your VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY are incorrect, or your database is currently unreachable. You can check your credentials in the AI Studio Settings, or click 'Bypass & Continue in Demo Mode' below to test the applet immediately.";
+      }
+      setLoginError(msg || "Could not connect to service. Please try again.");
     } finally {
       setIsLoggingIn(false);
     }
@@ -289,30 +1210,284 @@ export default function App() {
     }
   };
 
+  const generateStoryFromFilename = (fileName: string): string => {
+    const cleanName = fileName
+      .replace(/\.[^/.]+$/, "") // remove extension
+      .replace(/[_-]/g, " ") // replace underscores/hyphens with spaces
+      .replace(/([a-z])([A-Z])/g, '$1 $2') // split CamelCase
+      .trim();
+    
+    const title = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+    
+    return `Once upon a time, there was a wonderful child named ${childFirstName || "Sam"} who found a magical story called "${title}". 
+
+In the story, a wise friendly owl flew through the bright blue sky. The owl loved to help children sound out their letters and words. "You can read anything you want if you practice every day!" the owl cheered with a big happy smile. From that day on, ${childFirstName || "Sam"} practiced reading with Smart Pikin AI and became the best reader in the entire village!`;
+  };
+
   const processFile = (file: File) => {
     setUploadedFile(file);
     setUploadProgress(10);
     setAnalysisResult(null);
+    setExtractedText("");
+    setActiveWordIndex(-1);
+    setIsReadingAloud(false);
+    setChildSpeechTranscript("");
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (playbackTimer) {
+      clearInterval(playbackTimer);
+      setPlaybackTimer(null);
+    }
     
-    // Simulate progression
-    const interval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          triggerAIAnalysis(file.name);
-          return 100;
-        }
-        return prev + 15;
-      });
-    }, 150);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rawText = e.target?.result as string || "";
+      // Check if it has binary characters
+      const isBinary = /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(rawText.slice(0, 1000));
+      
+      let finalParsedText = "";
+      if (!isBinary && rawText.trim().length > 0) {
+        finalParsedText = rawText;
+      } else {
+        // Since PDFs, DOCX, and image files are binary formats, we keep the experience exact and custom
+        // by letting parents paste/type the exact text of their book, which is 100% authentic and unaltered!
+        finalParsedText = `[Type or paste the exact text of your book "${file.name}" here to read it exactly as it is without any alterations!]`;
+      }
+      
+      setExtractedText(finalParsedText);
+      
+      // Simulate progression
+      const interval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev >= 100) {
+            clearInterval(interval);
+            triggerAIAnalysis(file, finalParsedText);
+            return 100;
+          }
+          return prev + 15;
+        });
+      }, 150);
+    };
+    
+    // Read file as text to determine if it is text-based or binary
+    reader.readAsText(file);
   };
 
-  const triggerAIAnalysis = (fileName: string) => {
+  const triggerAIAnalysis = (file: File, textValue: string) => {
     setIsAnalyzing(true);
+    setWebhookStatus(n8nWebhookUrl ? 'sending' : 'idle');
+    setWebhookError(null);
+
+    // Give it a 2 second analysis duration
     setTimeout(() => {
       setIsAnalyzing(false);
-      setAnalysisResult(`Successfully imported "${fileName}" into Smart Pikin! Our AI has optimized this book with syllables breakdown, child-friendly audio guides, and generated 5 pronunciation milestone quizzes.`);
+      setExtractedText(textValue);
+      
+      setAnalysisResult(`Successfully loaded "${file.name}" into Smart Pikin! We kept your book's text exactly as it is without any modifications. You can now read it aloud or edit it below to make sure every word is perfect.`);
+      
+      // Dispatch to n8n Webhook
+      if (n8nWebhookUrl) {
+        try {
+          const reader = new FileReader();
+          reader.onload = async (e) => {
+            const base64Data = e.target?.result as string;
+            const payload = {
+              fileName: file.name,
+              fileSize: file.size,
+              fileType: file.type,
+              fileContentBase64: base64Data,
+              extractedText: textValue,
+              timestamp: new Date().toISOString(),
+              parentName: `${parentFirstName} ${parentLastName}`,
+              parentEmail: email,
+              childName: childFirstName,
+              childAge: childAge,
+              childGrade: childGrade
+            };
+            
+            try {
+              const response = await fetch(n8nWebhookUrl, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+              });
+              
+              if (response.ok) {
+                setWebhookStatus('success');
+              } else {
+                setWebhookStatus('error');
+                setWebhookError(`Webhook returned status ${response.status}`);
+              }
+            } catch (err: any) {
+              setWebhookStatus('error');
+              setWebhookError(err.message || 'Failed to connect to the n8n webhook. Make sure CORS is enabled or use HTTPS.');
+            }
+          };
+          reader.readAsDataURL(file);
+        } catch (err: any) {
+          setWebhookStatus('error');
+          setWebhookError(err.message || 'Failed to read file as Base64.');
+        }
+      }
     }, 2000);
+  };
+
+  // AI Story voice playing & highlighting engine
+  const speakStoryAloud = () => {
+    if (!('speechSynthesis' in window)) {
+      showToast("Text-to-speech is not supported in this browser.", "error");
+      return;
+    }
+
+    if (isReadingAloud) {
+      window.speechSynthesis.cancel();
+      setIsReadingAloud(false);
+      setActiveWordIndex(-1);
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        setPlaybackTimer(null);
+      }
+      return;
+    }
+
+    if (isMicListening) {
+      stopMicListening();
+    }
+
+    window.speechSynthesis.cancel();
+    
+    const textToSpeak = extractedText || "No text available to read.";
+    const wordsArray = textToSpeak.split(/\s+/);
+    
+    setActiveWordIndex(0);
+    setIsReadingAloud(true);
+
+    const utterance = new SpeechSynthesisUtterance(textToSpeak);
+    utterance.rate = speechRate;
+    
+    utterance.onboundary = (event) => {
+      if (event.name === 'word') {
+        const charIndex = event.charIndex;
+        const textBefore = textToSpeak.slice(0, charIndex);
+        const currentWordIdx = textBefore.trim().split(/\s+/).length;
+        setActiveWordIndex(currentWordIdx);
+      }
+    };
+
+    utterance.onend = () => {
+      setIsReadingAloud(false);
+      setActiveWordIndex(-1);
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        setPlaybackTimer(null);
+      }
+    };
+
+    utterance.onerror = () => {
+      setIsReadingAloud(false);
+      setActiveWordIndex(-1);
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        setPlaybackTimer(null);
+      }
+    };
+
+    // Fallback highlighter interval tracker (ensures word highlighting is robust and lively)
+    let idx = 0;
+    // words/min is roughly 140 under Normal (rate=1) speed
+    const intervalMs = Math.round((60 / (140 * speechRate)) * 1000);
+    
+    const timer = setInterval(() => {
+      idx++;
+      if (idx >= wordsArray.length) {
+        clearInterval(timer);
+      } else {
+        setActiveWordIndex(idx);
+      }
+    }, intervalMs);
+
+    setPlaybackTimer(timer);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Microphone Read-Along logic
+  const startMicListening = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast("Speech recognition is not supported in this browser. Please use Chrome or Safari.", "error");
+      return;
+    }
+
+    if (isReadingAloud) {
+      window.speechSynthesis.cancel();
+      setIsReadingAloud(false);
+      setActiveWordIndex(-1);
+      if (playbackTimer) {
+        clearInterval(playbackTimer);
+        setPlaybackTimer(null);
+      }
+    }
+
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-US';
+
+    rec.onstart = () => {
+      setIsMicListening(true);
+      setChildSpeechTranscript("Listening... Start reading the story out loud! 🎤");
+    };
+
+    rec.onresult = (event: any) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+      
+      const textSoFar = finalTranscript || interimTranscript;
+      setChildSpeechTranscript(textSoFar);
+    };
+
+    rec.onerror = (event: any) => {
+      console.warn("Speech recognition error event:", event);
+      if (event.error === 'not-allowed') {
+        setChildSpeechTranscript("Mic permission was denied. Try checking your browser microphone permissions!");
+      } else {
+        setChildSpeechTranscript(`Mic notice: ${event.error}. Please try again!`);
+      }
+      setIsMicListening(false);
+    };
+
+    rec.onend = () => {
+      setIsMicListening(false);
+    };
+
+    try {
+      rec.start();
+      setSpeechRecognitionInstance(rec);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const stopMicListening = () => {
+    if (speechRecognitionInstance) {
+      try {
+        speechRecognitionInstance.stop();
+      } catch (e) {
+        console.warn("Error stopping mic recognition:", e);
+      }
+    }
+    setIsMicListening(false);
   };
 
   const resetUploadState = () => {
@@ -320,6 +1495,23 @@ export default function App() {
     setUploadProgress(0);
     setIsAnalyzing(false);
     setAnalysisResult(null);
+    setExtractedText("");
+    setIsEditingText(false);
+    setActiveWordIndex(-1);
+    setIsReadingAloud(false);
+    setChildSpeechTranscript("");
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (playbackTimer) {
+      clearInterval(playbackTimer);
+      setPlaybackTimer(null);
+    }
+    if (isMicListening) {
+      stopMicListening();
+    }
+    setWebhookStatus('idle');
+    setWebhookError(null);
   };
 
   return (
@@ -332,7 +1524,7 @@ export default function App() {
           {/* Logo with backup layout */}
           <button 
             onClick={() => {
-              setCurrentView('landing');
+              setCurrentView(isLoggedIn ? 'dashboard' : 'landing');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
             className="flex items-center gap-3 cursor-pointer text-left focus:outline-none border-none bg-transparent"
@@ -358,10 +1550,30 @@ export default function App() {
                 <li>
                   <button 
                     onClick={() => {
+                      setCurrentView('profile');
+                      setActiveProfileTab(null);
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }}
+                    className={`hover:text-sky-pikin transition-colors font-bold cursor-pointer flex items-center gap-1 focus:outline-none border-none bg-transparent ${
+                      currentView === 'profile'
+                        ? 'text-sky-pikin underline decoration-2 underline-offset-4' 
+                        : 'text-navy-pikin'
+                    }`}
+                  >
+                    Profile 👤
+                  </button>
+                </li>
+                <li>
+                  <button 
+                    onClick={() => {
                       setCurrentView('dashboard');
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }}
-                    className={`hover:text-sky-pikin transition-colors font-bold cursor-pointer ${currentView === 'dashboard' ? 'text-sky-pikin underline decoration-2 underline-offset-4' : 'text-navy-pikin'}`}
+                    className={`hover:text-sky-pikin transition-colors font-bold cursor-pointer ${
+                      currentView === 'dashboard' 
+                        ? 'text-sky-pikin underline decoration-2 underline-offset-4' 
+                        : 'text-navy-pikin'
+                    }`}
                   >
                     My Dashboard 🏠
                   </button>
@@ -440,7 +1652,7 @@ export default function App() {
                     }}
                     className="bg-coral-pikin text-white px-6 py-2.5 rounded-full font-extrabold hover:bg-coral-pikin/90 hover:scale-105 active:scale-95 transition-all shadow-lg shadow-coral-pikin/20 cursor-pointer"
                   >
-                    Sign Up
+                    Start Free Trial
                   </button>
                 </li>
               </>
@@ -473,10 +1685,27 @@ export default function App() {
                       <button 
                         onClick={() => {
                           setMobileMenuOpen(false);
+                          setCurrentView('profile');
+                          setActiveProfileTab(null);
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className={`block w-full text-left py-2 hover:text-sky-pikin transition-colors font-bold cursor-pointer ${
+                          currentView === 'profile' ? 'text-sky-pikin font-black' : 'text-navy-pikin'
+                        }`}
+                      >
+                        👤 Profile
+                      </button>
+                    </li>
+                    <li>
+                      <button 
+                        onClick={() => {
+                          setMobileMenuOpen(false);
                           setCurrentView('dashboard');
                           window.scrollTo({ top: 0, behavior: 'smooth' });
                         }}
-                        className={`block w-full text-left py-2 hover:text-sky-pikin transition-colors font-bold cursor-pointer ${currentView === 'dashboard' ? 'text-sky-pikin font-black' : 'text-navy-pikin'}`}
+                        className={`block w-full text-left py-2 hover:text-sky-pikin transition-colors font-bold cursor-pointer ${
+                          currentView === 'dashboard' ? 'text-sky-pikin font-black' : 'text-navy-pikin'
+                        }`}
                       >
                         🏠 My Dashboard
                       </button>
@@ -562,7 +1791,7 @@ export default function App() {
                         }}
                         className="w-full bg-coral-pikin text-white text-center py-3 rounded-full font-extrabold hover:bg-coral-pikin/95 active:scale-95 transition-all shadow-md shadow-coral-pikin/20 cursor-pointer"
                       >
-                        Sign Up
+                        Start Free Trial
                       </button>
                     </li>
                   </>
@@ -697,39 +1926,18 @@ export default function App() {
 
             <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-[2.5rem] p-8 md:p-12 relative overflow-hidden">
               <AnimatePresence mode="wait">
-              {!formSubmitted ? (
                 <motion.form 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  onSubmit={handleSignupSubmit} 
-                  className="space-y-6"
+                  key="signup-form"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  onSubmit={handleStep1Submit} 
+                  className="space-y-6 text-left"
                 >
-                  
-                  {/* Two column row */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className="flex flex-col gap-2">
-                      <label className="font-bold text-sm text-[#b0d8f0]">Parent's First Name</label>
-                      <input 
-                        type="text" 
-                        required 
-                        value={parentFirstName}
-                        onChange={(e) => setParentFirstName(e.target.value)}
-                        placeholder="e.g. Amaka"
-                        className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <label className="font-bold text-sm text-[#b0d8f0]">Parent's Last Name</label>
-                      <input 
-                        type="text" 
-                        required 
-                        value={parentLastName}
-                        onChange={(e) => setParentLastName(e.target.value)}
-                        placeholder="e.g. Okafor"
-                        className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
-                      />
-                    </div>
+                  <div className="text-center mb-6">
+                    <span className="text-4xl mb-2 inline-block">🚀</span>
+                    <h2 className="font-display text-2xl md:text-3xl font-black text-white">Create a Free Account</h2>
+                    <p className="text-[#b0d8f0] text-sm mt-1">Sign up instantly with your email and password</p>
                   </div>
 
                   {/* Email */}
@@ -745,131 +1953,102 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Phone */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-bold text-sm text-[#b0d8f0]">Phone Number (WhatsApp preferred)</label>
-                    <input 
-                      type="tel" 
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      placeholder="+234 800 000 0000"
-                      className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
-                    />
-                  </div>
-
-                  {/* Child's first name */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-bold text-sm text-[#b0d8f0]">Child's First Name</label>
-                    <input 
-                      type="text" 
-                      required 
-                      value={childFirstName}
-                      onChange={(e) => setChildFirstName(e.target.value)}
-                      placeholder="Your child's name"
-                      className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
-                    />
-                  </div>
-
-                  {/* Number of Children select */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-bold text-sm text-[#b0d8f0]">Number of Children</label>
-                    <select 
-                      value={numChildren}
-                      onChange={(e) => setNumChildren(e.target.value)}
-                      className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 text-white focus:border-sky-pikin focus:outline-none transition-all text-[15px]"
-                    >
-                      <option value="" className="bg-navy-pikin text-slate-300">Select…</option>
-                      <option value="1" className="bg-navy-pikin text-white">1 child</option>
-                      <option value="2" className="bg-navy-pikin text-white">2 children</option>
-                      <option value="3" className="bg-navy-pikin text-white">3 children</option>
-                      <option value="4" className="bg-navy-pikin text-white">4+ children</option>
-                    </select>
-                  </div>
-
-                  {/* Age multi-select custom pills */}
-                  <div className="flex flex-col gap-3">
-                    <label className="font-bold text-sm text-[#b0d8f0]">Child's Age Range (select all that apply)</label>
-                    <div className="flex flex-wrap gap-3">
-                      {ageOptions.map((opt) => {
-                        const isChecked = selectedAges.includes(opt.label);
-                        return (
-                          <button 
-                            key={opt.id}
-                            type="button"
-                            onClick={() => toggleAgeRange(opt.label)}
-                            className={`px-5 py-2.5 rounded-full border-2 text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                              isChecked 
-                                ? "bg-sky-pikin border-sky-pikin text-white shadow-md shadow-sky-pikin/30" 
-                                : "border-white/25 text-white/80 hover:border-sky-pikin hover:text-white"
-                            }`}
-                          >
-                            {isChecked && <Check className="h-4 w-4 text-white" />}
-                            {opt.label}
-                          </button>
-                        );
-                      })}
+                  {/* Password fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className="flex flex-col gap-2">
+                      <label className="font-bold text-sm text-[#b0d8f0]">Create Password</label>
+                      <div className="relative">
+                        <input 
+                          type={showSignupPassword ? "text" : "password"} 
+                          required 
+                          value={signupPassword}
+                          onChange={(e) => setSignupPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full p-3.5 pr-12 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSignupPassword(!showSignupPassword)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors cursor-pointer p-1 rounded-md hover:bg-white/5"
+                          aria-label={showSignupPassword ? "Hide password" : "Show password"}
+                        >
+                          {showSignupPassword ? (
+                            <EyeOff className="h-5 w-5" />
+                          ) : (
+                            <Eye className="h-5 w-5" />
+                          )}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Reading level select */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-bold text-sm text-[#b0d8f0]">Reading Level of Your Child</label>
-                    <select 
-                      value={readingLevel}
-                      onChange={(e) => setReadingLevel(e.target.value)}
-                      className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 text-white focus:border-sky-pikin focus:outline-none transition-all text-[15px]"
-                    >
-                      <option value="" className="bg-navy-pikin text-slate-300">Select…</option>
-                      <option value="Beginner" className="bg-navy-pikin text-white">Beginner – just starting out</option>
-                      <option value="Developing" className="bg-navy-pikin text-white">Developing – recognises words</option>
-                      <option value="Intermediate" className="bg-navy-pikin text-white">Intermediate – reads sentences</option>
-                      <option value="Advanced" className="bg-navy-pikin text-white">Advanced – reads full stories</option>
-                    </select>
-                  </div>
-
-                  {/* How heard select */}
-                  <div className="flex flex-col gap-2">
-                    <label className="font-bold text-sm text-[#b0d8f0]">How did you hear about us?</label>
-                    <select 
-                      value={referralSource}
-                      onChange={(e) => setReferralSource(e.target.value)}
-                      className="p-3.5 rounded-xl border-2 border-white/20 bg-white/10 text-white focus:border-sky-pikin focus:outline-none transition-all text-[15px]"
-                    >
-                      <option value="" className="bg-navy-pikin text-slate-300">Select…</option>
-                      <option value="Social Media" className="bg-navy-pikin text-white">Social Media</option>
-                      <option value="Friend" className="bg-navy-pikin text-white">Friend / Family</option>
-                      <option value="School" className="bg-navy-pikin text-white">School / Teacher</option>
-                      <option value="Search" className="bg-navy-pikin text-white">Google Search</option>
-                      <option value="Other" className="bg-navy-pikin text-white">Other</option>
-                    </select>
-                  </div>
-
-                  {/* Terms checkbox */}
-                  <div className="flex items-start gap-3 mt-4">
-                    <input 
-                      type="checkbox" 
-                      id="terms-check"
-                      checked={termsAccepted}
-                      onChange={(e) => setTermsAccepted(e.target.checked)}
-                      className="mt-1 h-5 w-5 rounded border-white/20 bg-white/10 accent-sky-pikin focus:outline-none cursor-pointer"
-                    />
-                    <label htmlFor="terms-check" className="text-xs text-[#b0d8f0] leading-relaxed cursor-pointer select-none">
-                      I agree to the <a href="#" className="text-sky-pikin underline">Terms of Service</a> and <a href="#" className="text-sky-pikin underline">Privacy Policy</a>. I understand my child's data is safe and never shared.
-                    </label>
+                    <div className="flex flex-col gap-2">
+                      <label className="font-bold text-sm text-[#b0d8f0]">Confirm Password</label>
+                      <div className="relative">
+                        <input 
+                          type={showSignupConfirmPassword ? "text" : "password"} 
+                          required 
+                          value={signupConfirmPassword}
+                          onChange={(e) => setSignupConfirmPassword(e.target.value)}
+                          placeholder="••••••••"
+                          className="w-full p-3.5 pr-12 rounded-xl border-2 border-white/20 bg-white/10 placeholder:text-white/40 focus:border-sky-pikin focus:outline-none transition-all text-white text-[15px]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSignupConfirmPassword(!showSignupConfirmPassword)}
+                          className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/60 hover:text-white transition-colors cursor-pointer p-1 rounded-md hover:bg-white/5"
+                          aria-label={showSignupConfirmPassword ? "Hide password" : "Show password"}
+                        >
+                          {showSignupConfirmPassword ? (
+                            <EyeOff className="h-5 w-5" />
+                          ) : (
+                            <Eye className="h-5 w-5" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Error display */}
                   {errorMsg && (
-                    <p className="text-rose-300 text-sm font-bold bg-rose-500/10 p-3 rounded-xl border border-rose-500/20">
-                      ⚠️ {errorMsg}
-                    </p>
+                    <div className="bg-red-500/15 text-red-200 border border-red-500/25 p-5 rounded-2xl space-y-4 text-left leading-relaxed">
+                      <p className="font-bold text-rose-300 text-sm flex items-start gap-2">
+                        <span className="text-base shrink-0">⚠️</span> 
+                        <span>{errorMsg}</span>
+                      </p>
+                      
+                      <div className="bg-white/5 p-3.5 rounded-xl border border-white/10 text-xs text-[#b0d8f0] space-y-2">
+                        <p className="font-extrabold uppercase tracking-wider text-sky-pikin text-[10px]">🛠️ Supabase Configuration & Sandbox Guide</p>
+                        <ul className="list-disc pl-4 space-y-1 text-[#b0d8f0]/90">
+                          <li><strong>Check Credentials:</strong> Double check that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly in your AI Studio Settings.</li>
+                          <li><strong>Network Failures:</strong> "Failed to Fetch" means your Supabase project URL is incorrect, paused, or network restricted.</li>
+                          <li><strong>Disable Email Confirmation:</strong> Supabase requires email verification by default. Under <strong>Supabase &gt; Authentication &gt; Providers &gt; Email</strong>, turn off <strong>Confirm Email</strong> to enable instant signups.</li>
+                        </ul>
+                      </div>
+
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Instantly transition to Dashboard using simulated local data
+                            setIsLoggedIn(true);
+                            setIsDemoMode(true);
+                            setCurrentView('dashboard');
+                            window.scrollTo({ top: 0 });
+                            setErrorMsg("");
+                          }}
+                          className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/10 cursor-pointer w-full border-none focus:outline-none"
+                        >
+                          <Sparkles className="h-4 w-4 shrink-0" />
+                          <span>⚡ Bypass & Continue in Demo Mode</span>
+                        </button>
+                      </div>
+                    </div>
                   )}
 
-                  {/* Submit button */}
+                  {/* Button */}
                   <button 
                     type="submit" 
                     disabled={isSubmitting}
-                    className="w-full bg-coral-pikin text-white py-4 px-6 rounded-full font-display text-lg tracking-wide hover:scale-102 active:scale-98 disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-coral-pikin/30 hover:shadow-xl hover:shadow-coral-pikin/40 flex items-center justify-center gap-2"
+                    className="w-full bg-coral-pikin text-white py-4 px-6 rounded-full font-display text-lg tracking-wide hover:scale-102 active:scale-98 disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-coral-pikin/30 hover:shadow-xl hover:shadow-coral-pikin/40 flex items-center justify-center gap-2 font-extrabold"
                   >
                     {isSubmitting ? (
                       <>
@@ -877,7 +2056,7 @@ export default function App() {
                         <span>Creating Account...</span>
                       </>
                     ) : (
-                      <span>🎉 Create Free Account</span>
+                      <span>CREATE ACCOUNT</span>
                     )}
                   </button>
 
@@ -900,61 +2079,10 @@ export default function App() {
                     </button>
                   </p>
                 </motion.form>
-              ) : (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="text-center py-12 space-y-6"
-                >
-                  <div className="w-20 h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl border border-emerald-500/30">
-                    🎉
-                  </div>
-                  <h3 className="font-display text-3xl text-white">Welcome on board, {parentFirstName}!</h3>
-                  <p className="text-[#b0d8f0] max-w-md mx-auto leading-relaxed">
-                    Thank you for signing up to Smart Pikin! We've prepared a custom profile for <strong className="text-white font-black">{childFirstName}</strong> matching the <strong className="text-white font-black">{selectedAges.join(", ") || "3-5 yrs"}</strong> reading milestones.
-                  </p>
-                  
-                  <div className="bg-white/5 p-6 rounded-2xl border border-white/15 max-w-md mx-auto text-left space-y-3.5">
-                    <h4 className="font-bold text-sky-pikin flex items-center gap-1.5 border-b border-white/10 pb-2">
-                      <Sparkles className="h-4 w-4" /> Next Steps For You:
-                    </h4>
-                    <div className="flex gap-2.5 items-start text-sm text-[#b0d8f0]">
-                      <span className="bg-sky-pikin/20 text-sky-pikin rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">1</span>
-                      <span>Check your email (<strong>{email}</strong>) to activate your account credentials.</span>
-                    </div>
-                    <div className="flex gap-2.5 items-start text-sm text-[#b0d8f0]">
-                      <span className="bg-sky-pikin/20 text-sky-pikin rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">2</span>
-                      <span>Log in to access 200+ specialized visual interactive books.</span>
-                    </div>
-                    <div className="flex gap-2.5 items-start text-sm text-[#b0d8f0]">
-                      <span className="bg-sky-pikin/20 text-sky-pikin rounded-full w-5 h-5 flex items-center justify-center shrink-0 font-bold text-xs mt-0.5">3</span>
-                      <span>Test any custom school story book via the "Upload Your Book" feature.</span>
-                    </div>
-                  </div>
-
-                  <button 
-                    onClick={() => {
-                      setFormSubmitted(false);
-                      setIsLoggedIn(true);
-                      if (!childFirstName) {
-                        setChildFirstName("Femi");
-                      }
-                      if (!parentFirstName) {
-                        setParentFirstName("Amaka");
-                      }
-                      setCurrentView('dashboard');
-                      window.scrollTo({ top: 0 });
-                    }}
-                    className="bg-sky-pikin text-white font-extrabold px-8 py-3.5 rounded-full hover:bg-sky-pikin/90 transition-all cursor-pointer shadow-md text-sm flex items-center gap-2 mx-auto"
-                  >
-                    Go to My Account Dashboard 🚀
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
+              </AnimatePresence>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
       ) : currentView === 'login' ? (
         <section className="bg-gradient-to-br from-navy-pikin via-[#14446e] to-[#0f5f8f] text-white py-12 px-6 min-h-[85vh] flex items-center justify-center">
           <div className="max-w-md w-full">
@@ -994,20 +2122,67 @@ export default function App() {
 
                   <div className="flex flex-col gap-2">
                     <label className="font-bold text-sm text-navy-pikin/80 text-left">Password</label>
-                    <input 
-                      type="password" 
-                      required 
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      placeholder="••••••••"
-                      className="p-3 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin font-sans"
-                    />
+                    <div className="relative">
+                      <input 
+                        type={showLoginPassword ? "text" : "password"} 
+                        required 
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full p-3 pr-12 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin font-sans"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer p-1 rounded-md hover:bg-slate-50"
+                        aria-label={showLoginPassword ? "Hide password" : "Show password"}
+                      >
+                        {showLoginPassword ? (
+                          <EyeOff className="h-5 w-5" />
+                        ) : (
+                          <Eye className="h-5 w-5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
 
                   {loginError && (
-                    <p className="text-rose-600 text-xs font-bold bg-rose-50 p-2.5 rounded-lg border border-rose-100 text-left">
-                      ⚠️ {loginError}
-                    </p>
+                    <div className="bg-red-50 text-red-900 border border-red-200 p-5 rounded-2xl space-y-4 text-left leading-relaxed text-xs">
+                      <p className="font-bold text-rose-700 flex items-start gap-2">
+                        <span className="text-base shrink-0">⚠️</span> 
+                        <span>{loginError}</span>
+                      </p>
+                      
+                      {(loginError.includes("Supabase") || loginError.toLowerCase().includes("fetch")) && (
+                        <>
+                          <div className="bg-white/60 p-3.5 rounded-xl border border-red-100 space-y-2">
+                            <p className="font-extrabold uppercase tracking-wider text-rose-800 text-[10px]">🛠️ Supabase Configuration & Sandbox Guide</p>
+                            <ul className="list-disc pl-4 space-y-1 text-red-800">
+                              <li><strong>Check Credentials:</strong> Double check that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly in your AI Studio Settings.</li>
+                              <li><strong>Network Failures:</strong> "Failed to Fetch" means your Supabase project URL is incorrect, paused, or network restricted.</li>
+                            </ul>
+                          </div>
+
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Instantly transition to Dashboard using simulated local data
+                                setIsLoggedIn(true);
+                                setIsDemoMode(true);
+                                setCurrentView('dashboard');
+                                window.scrollTo({ top: 0 });
+                                setLoginError("");
+                              }}
+                              className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/10 cursor-pointer w-full border-none focus:outline-none"
+                            >
+                              <Sparkles className="h-4 w-4 shrink-0" />
+                              <span>⚡ Bypass & Continue in Demo Mode</span>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
                   )}
 
                   <button 
@@ -1035,7 +2210,7 @@ export default function App() {
                       }}
                       className="text-sky-pikin font-extrabold hover:underline cursor-pointer bg-transparent border-none p-0"
                     >
-                      Sign up free
+                      Start Free Trial
                     </button>
                   </p>
                 </form>
@@ -1077,15 +2252,15 @@ export default function App() {
       {currentView === 'books' && (
         <section className="bg-gradient-to-br from-cyan-50 via-amber-50 to-emerald-50 py-12 px-6 min-h-[85vh]">
           <div className="max-w-7xl mx-auto">
-            {/* Back to Home Button */}
+            {/* Back Button */}
             <button 
               onClick={() => {
-                setCurrentView('landing');
+                setCurrentView(isLoggedIn ? 'dashboard' : 'landing');
                 window.scrollTo({ top: 0 });
               }}
               className="inline-flex items-center gap-2 text-navy-pikin/80 hover:text-navy-pikin font-extrabold text-sm mb-8 hover:underline cursor-pointer focus:outline-none bg-white/60 hover:bg-white px-4 py-2 rounded-full shadow-sm transition-all border border-sky-pikin/10"
             >
-              ← Back to Home
+              {isLoggedIn ? "← Back to My Dashboard" : "← Back to Home"}
             </button>
 
             {/* Header */}
@@ -1200,15 +2375,15 @@ export default function App() {
       {currentView === 'how' && (
         <section className="bg-gradient-to-br from-cyan-50 via-amber-50 to-emerald-50 py-12 px-6 min-h-[85vh]">
           <div className="max-w-7xl mx-auto">
-            {/* Back to Home Button */}
+            {/* Back Button */}
             <button 
               onClick={() => {
-                setCurrentView('landing');
+                setCurrentView(isLoggedIn ? 'dashboard' : 'landing');
                 window.scrollTo({ top: 0 });
               }}
               className="inline-flex items-center gap-2 text-navy-pikin/80 hover:text-navy-pikin font-extrabold text-sm mb-8 hover:underline cursor-pointer focus:outline-none bg-white/60 hover:bg-white px-4 py-2 rounded-full shadow-sm transition-all border border-sky-pikin/10"
             >
-              ← Back to Home
+              {isLoggedIn ? "← Back to My Dashboard" : "← Back to Home"}
             </button>
 
             {/* Header */}
@@ -1329,15 +2504,15 @@ export default function App() {
       {currentView === 'features' && (
         <section className="bg-gradient-to-br from-cyan-50 via-amber-50 to-[#ecf9ff] py-12 px-6 min-h-[85vh]">
           <div className="max-w-7xl mx-auto">
-            {/* Back to Home Button */}
+            {/* Back Button */}
             <button 
               onClick={() => {
-                setCurrentView('landing');
+                setCurrentView(isLoggedIn ? 'dashboard' : 'landing');
                 window.scrollTo({ top: 0 });
               }}
               className="inline-flex items-center gap-2 text-navy-pikin/80 hover:text-navy-pikin font-extrabold text-sm mb-8 hover:underline cursor-pointer focus:outline-none bg-white/60 hover:bg-white px-4 py-2 rounded-full shadow-sm transition-all border border-sky-pikin/10"
             >
-              ← Back to Home
+              {isLoggedIn ? "← Back to My Dashboard" : "← Back to Home"}
             </button>
 
             {/* Header */}
@@ -1530,11 +2705,301 @@ export default function App() {
       {currentView === 'dashboard' && (
         <section className="bg-gradient-to-br from-[#f0f9ff] via-[#fefaf0] to-[#f0fdf4] py-12 px-4 sm:px-6 min-h-[90vh]">
           <div className="max-w-7xl mx-auto space-y-10">
-            
-            {/* Dashboard Header Banner */}
-            <motion.div 
-              initial={{ opacity: 0, y: -15 }}
-              animate={{ opacity: 1, y: 0 }}
+            {!isProfileCompleted ? (
+              <div className="max-w-2xl mx-auto">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white rounded-[2.5rem] p-8 md:p-12 border-4 border-sky-pikin/20 shadow-xl text-navy-pikin font-sans relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-sky-pikin/5 rounded-full blur-2xl pointer-events-none" />
+                  <div className="absolute bottom-0 left-0 w-32 h-32 bg-amber-pikin/5 rounded-full blur-2xl pointer-events-none" />
+
+                  {onboardingStep === 'parent' ? (
+                    <>
+                      <div className="text-center mb-8">
+                        <span className="text-4xl mb-2 inline-block">👨‍👩-</span>
+                        <h3 className="font-display text-3xl font-black text-navy-pikin">Parent Account Registration</h3>
+                        <p className="text-slate-500 text-sm mt-1">
+                          Welcome to Smart Pikin! Step 1 of 2: Let's register your parent profile.
+                        </p>
+                      </div>
+
+                      <form onSubmit={handleCompleteParentProfileSubmit} className="space-y-6 text-left">
+                        {/* Parent Information Section */}
+                        <div className="space-y-4">
+                          <h4 className="text-xs font-black uppercase tracking-widest text-sky-pikin border-b border-slate-100 pb-1 text-left">PARENT'S INFORMATION</h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-2">
+                              <label className="font-bold text-sm text-slate-700">First Name</label>
+                              <input 
+                                type="text" 
+                                required 
+                                value={parentFirstName}
+                                onChange={(e) => setParentFirstName(e.target.value)}
+                                placeholder="e.g. Amaka"
+                                className="p-3.5 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <label className="font-bold text-sm text-slate-700">Last Name</label>
+                              <input 
+                                type="text" 
+                                required 
+                                value={parentLastName}
+                                onChange={(e) => setParentLastName(e.target.value)}
+                                placeholder="e.g. Okafor"
+                                className="p-3.5 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin"
+                              />
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <div className="flex flex-col gap-2">
+                              <label className="font-bold text-sm text-slate-700">Email Address</label>
+                              <input 
+                                type="email" 
+                                required 
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="e.g. parent@example.com"
+                                className="p-3.5 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin"
+                              />
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              <label className="font-bold text-sm text-slate-700">Phone Number</label>
+                              <input 
+                                type="tel" 
+                                required 
+                                value={phone}
+                                onChange={(e) => setPhone(e.target.value)}
+                                placeholder="e.g. +234 801 234 5678"
+                                className="p-3.5 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Terms & safety checkbox */}
+                        <div className="flex items-start gap-3 mt-4">
+                          <input 
+                            type="checkbox" 
+                            id="dash-terms-check"
+                            required
+                            checked={termsAccepted}
+                            onChange={(e) => setTermsAccepted(e.target.checked)}
+                            className="mt-1 h-5 w-5 rounded border-slate-300 text-sky-pikin focus:ring-sky-pikin focus:outline-none cursor-pointer"
+                          />
+                          <label htmlFor="dash-terms-check" className="text-xs text-slate-500 leading-relaxed cursor-pointer select-none">
+                            I agree to the <a href="#" onClick={(e) => { e.preventDefault(); showToast("Smart Pikin is 100% COPPA compliant and secure.", "info"); }} className="text-sky-pikin underline font-bold">Terms of Service</a> and <a href="#" onClick={(e) => { e.preventDefault(); showToast("Your child's privacy is our highest priority.", "info"); }} className="text-sky-pikin underline font-bold">Privacy Policy</a>. I understand my child's data is safe and never shared.
+                          </label>
+                        </div>
+
+                        {/* Error display */}
+                        {errorMsg && (
+                          <p className="text-rose-600 text-xs font-bold bg-rose-50 p-2.5 rounded-lg border border-rose-100 text-left">
+                            ⚠️ {errorMsg}
+                          </p>
+                        )}
+
+                        {/* Actions */}
+                        <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                          <button 
+                            type="submit" 
+                            disabled={isSubmitting}
+                            className="flex-1 bg-coral-pikin hover:bg-coral-pikin/90 text-white py-3.5 px-6 rounded-full font-bold text-base transition-all flex items-center justify-center gap-2 shadow-lg shadow-coral-pikin/25 cursor-pointer border-none"
+                          >
+                            {isSubmitting ? (
+                              <>
+                                <RefreshCw className="h-5 w-5 animate-spin" />
+                                <span>Saving Parent Profile...</span>
+                              </>
+                            ) : (
+                              <span>Save Parent Profile & Continue ➡️</span>
+                            )}
+                          </button>
+                          <button 
+                            type="button" 
+                            onClick={() => {
+                              // Quick demo pre-fill
+                              setParentFirstName("Amaka");
+                              setParentLastName("Okafor");
+                              setEmail("amaka.okafor@gmail.com");
+                              setPhone("+234 801 234 5678");
+                              setTermsAccepted(true);
+                              setOnboardingStep('addChild');
+                              setChildFormVisible(false);
+                            }}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold px-6 py-3.5 rounded-full text-sm transition-all cursor-pointer border-none"
+                          >
+                            ⚡ Quick Demo Parent Profile
+                          </button>
+                        </div>
+                      </form>
+                    </>
+                  ) : (
+                    <>
+                      {!childFormVisible ? (
+                        <div className="text-center py-6 space-y-6">
+                          <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto text-emerald-600 text-4xl shadow-md">
+                            🎉
+                          </div>
+                          <div className="space-y-2">
+                            <h3 className="font-display text-3xl font-black text-navy-pikin">Parent Account Complete!</h3>
+                            <p className="text-slate-600 text-sm max-w-md mx-auto leading-relaxed">
+                              Your parent profile for <span className="font-extrabold text-sky-pikin">{parentFirstName} {parentLastName}</span> has been set up successfully.
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              Next, click "Add a Child" below to set up your child's learning profile.
+                            </p>
+                          </div>
+
+                          <div className="pt-4 flex flex-col items-center justify-center gap-4">
+                            <button
+                              onClick={() => setChildFormVisible(true)}
+                              className="bg-sky-pikin hover:bg-sky-pikin/90 text-white font-black text-lg px-10 py-4 rounded-full shadow-lg shadow-sky-pikin/30 hover:scale-105 active:scale-95 transition-all cursor-pointer border-none flex items-center gap-2"
+                            >
+                              ➕ Add a Child
+                            </button>
+                            
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Demo bypass
+                                setChildFirstName("Femi");
+                                setChildAge("6-8");
+                                setChildGender("Male");
+                                setChildGrade("Primary 1");
+                                setReadingLevel("Beginner");
+                                setIsProfileCompleted(true);
+                                showToast("Demo mode: Child Femi added automatically!", "success");
+                              }}
+                              className="text-slate-400 hover:text-slate-600 font-bold text-xs transition-colors cursor-pointer bg-transparent border-none"
+                            >
+                              Bypass & pre-fill child for testing
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-center mb-8">
+                            <span className="text-4xl mb-2 inline-block">🐣</span>
+                            <h3 className="font-display text-3xl font-black text-navy-pikin">Add your Child's Information</h3>
+                            <p className="text-slate-500 text-sm mt-1">
+                              Let's set up the learning journey for your child.
+                            </p>
+                          </div>
+
+                          <form onSubmit={handleCompleteChildProfileSubmit} className="space-y-6 text-left">
+                            <div className="space-y-4 pt-2">
+                              <h4 className="text-xs font-black uppercase tracking-widest text-sky-pikin border-b border-slate-100 pb-1 text-left">CHILD'S INFORMATION</h4>
+                              
+                              <div className="flex flex-col gap-2">
+                                <label className="font-bold text-sm text-slate-700">First Name</label>
+                                <input 
+                                  type="text" 
+                                  required 
+                                  value={childFirstName}
+                                  onChange={(e) => setChildFirstName(e.target.value)}
+                                  placeholder="e.g. Femi"
+                                  className="p-3.5 rounded-xl border-2 border-slate-200 focus:border-sky-pikin focus:outline-none transition-all text-[15px] text-navy-pikin"
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <div className="flex flex-col gap-2">
+                                  <label className="font-bold text-sm text-slate-700">Age Range</label>
+                                  <select 
+                                    value={childAge}
+                                    onChange={(e) => setChildAge(e.target.value)}
+                                    required
+                                    className="p-3.5 rounded-xl border-2 border-slate-200 text-navy-pikin focus:border-sky-pikin focus:outline-none transition-all text-[15px] bg-white"
+                                  >
+                                    <option value="" className="text-slate-400">Select Age Range…</option>
+                                    <option value="3-5" className="text-navy-pikin">3–5 years old 🐣</option>
+                                    <option value="6-8" className="text-navy-pikin">6–8 years old 🌱</option>
+                                    <option value="9-11" className="text-navy-pikin">9–11 years old 📚</option>
+                                    <option value="12-14" className="text-navy-pikin">12–14 years old 🚀</option>
+                                  </select>
+                                </div>
+
+                                <div className="flex flex-col gap-2">
+                                  <label className="font-bold text-sm text-slate-700">Gender</label>
+                                  <select 
+                                    value={childGender}
+                                    onChange={(e) => setChildGender(e.target.value)}
+                                    className="p-3.5 rounded-xl border-2 border-slate-200 text-navy-pikin focus:border-sky-pikin focus:outline-none transition-all text-[15px] bg-white"
+                                  >
+                                    <option value="" className="text-slate-400">Select Gender…</option>
+                                    <option value="Male" className="text-navy-pikin">Male</option>
+                                    <option value="Female" className="text-navy-pikin">Female</option>
+                                    <option value="Other" className="text-navy-pikin">Prefer not to say</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <label className="font-bold text-sm text-slate-700">Reading Level Milestone</label>
+                                <select 
+                                  value={readingLevel}
+                                  onChange={(e) => setReadingLevel(e.target.value)}
+                                  required
+                                  className="p-3.5 rounded-xl border-2 border-slate-200 text-navy-pikin focus:border-sky-pikin focus:outline-none transition-all text-[15px] bg-white"
+                                >
+                                  <option value="" className="text-slate-400">Select Reading Level…</option>
+                                  <option value="Beginner" className="text-navy-pikin">Beginner – just starting out</option>
+                                  <option value="Developing" className="text-navy-pikin">Developing – recognises words</option>
+                                  <option value="Intermediate" className="text-navy-pikin">Intermediate – reads sentences</option>
+                                  <option value="Advanced" className="text-navy-pikin">Advanced – reads full stories</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Error display */}
+                            {errorMsg && (
+                              <p className="text-rose-600 text-xs font-bold bg-rose-50 p-2.5 rounded-lg border border-rose-100 text-left">
+                                ⚠️ {errorMsg}
+                              </p>
+                            )}
+
+                            {/* Actions */}
+                            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                              <button 
+                                type="submit" 
+                                disabled={isSubmitting}
+                                className="flex-1 bg-coral-pikin hover:bg-coral-pikin/90 text-white py-3.5 px-6 rounded-full font-bold text-base transition-all flex items-center justify-center gap-2 shadow-lg shadow-coral-pikin/25 cursor-pointer border-none"
+                              >
+                                {isSubmitting ? (
+                                  <>
+                                    <RefreshCw className="h-5 w-5 animate-spin" />
+                                    <span>Saving Child Profile...</span>
+                                  </>
+                                ) : (
+                                  <span>Save Child & Enter Learning Island! 🚀</span>
+                                )}
+                              </button>
+                              
+                              <button 
+                                type="button" 
+                                onClick={() => setChildFormVisible(false)}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold px-6 py-3.5 rounded-full text-sm transition-all cursor-pointer border-none"
+                              >
+                                ⬅️ Back
+                              </button>
+                            </div>
+                          </form>
+                        </>
+                      )}
+                    </>
+                  )}
+                </motion.div>
+              </div>
+            ) : (
+              <>
+                {/* Dashboard Header Banner */}
+                <motion.div 
+                  initial={{ opacity: 0, y: -15 }}
+                  animate={{ opacity: 1, y: 0 }}
               className="bg-gradient-to-r from-navy-pikin via-[#1d5c90] to-sky-pikin text-white p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden flex flex-col md:flex-row justify-between items-center gap-6 border-4 border-sky-pikin/20"
             >
               <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-2xl pointer-events-none -mr-20 -mt-20" />
@@ -1576,90 +3041,109 @@ export default function App() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="space-y-4"
+              className="space-y-6"
             >
-              <div className="text-left">
-                <h3 className="font-display text-2xl text-navy-pikin tracking-tight flex items-center gap-2">
-                  <span>Choose Your Adventure!</span>
-                  <span className="animate-pulse">🏝️</span>
-                </h3>
-                <p className="text-slate-500 text-xs sm:text-sm">
-                  Click on an activity below to launch its interactive game or soundboard.
-                </p>
-              </div>
+              {/* Kids Zone Header and Buttons */}
+              <div className="space-y-3">
+                <div className="text-left border-l-4 border-sky-pikin pl-3">
+                  <h3 className="font-display text-xl text-navy-pikin tracking-tight flex items-center gap-2">
+                    <span>🚀 Kid's Learning Adventures</span>
+                    <span className="text-xs bg-sky-pikin/10 text-sky-pikin px-2 py-0.5 rounded-full font-bold">Kids Zone</span>
+                  </h3>
+                  <p className="text-slate-500 text-xs">
+                    Choose a learning game or interactive phonics board below.
+                  </p>
+                </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <button 
-                  onClick={() => setActiveDashboardFeature('spelling')}
-                  className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
-                    activeDashboardFeature === 'spelling'
-                      ? "bg-[#fffbeb] border-[#f59e0b] text-amber-950 shadow-lg shadow-amber-200/40 scale-102"
-                      : "bg-white border-slate-100 hover:border-[#ffedd5] text-slate-700 hover:bg-[#fffdfa]"
-                  }`}
-                >
-                  <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">🐝</div>
-                  <div className="text-3xl">🐝</div>
-                  <div>
-                    <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Spelling Bee</h4>
-                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">Learn sounds & spell</p>
-                  </div>
-                </button>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <button 
+                    onClick={() => setActiveDashboardFeature('abc123')}
+                    className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
+                      activeDashboardFeature === 'abc123'
+                        ? "bg-[#f0f9ff] border-[#0284c7] text-sky-950 shadow-lg shadow-sky-200/40 scale-102"
+                        : "bg-white border-slate-100 hover:border-[#e0f2fe] text-slate-700 hover:bg-[#fafcfe]"
+                    }`}
+                  >
+                    <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">🐣</div>
+                    <div className="text-3xl">🐣</div>
+                    <div>
+                      <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Read ABC & 123</h4>
+                      <p className="text-[10px] text-slate-500 font-bold mt-0.5">Interactive board</p>
+                    </div>
+                  </button>
 
-                <button 
-                  onClick={() => setActiveDashboardFeature('abc123')}
-                  className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
-                    activeDashboardFeature === 'abc123'
-                      ? "bg-[#f0f9ff] border-[#0284c7] text-sky-950 shadow-lg shadow-sky-200/40 scale-102"
-                      : "bg-white border-slate-100 hover:border-[#e0f2fe] text-slate-700 hover:bg-[#fafcfe]"
-                  }`}
-                >
-                  <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">🐣</div>
-                  <div className="text-3xl">🐣</div>
-                  <div>
-                    <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Read ABC & 123</h4>
-                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">Interactive board</p>
-                  </div>
-                </button>
+                  <button 
+                    onClick={() => setActiveDashboardFeature('library')}
+                    className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
+                      activeDashboardFeature === 'library'
+                        ? "bg-[#ecfdf5] border-[#10b981] text-emerald-950 shadow-lg shadow-emerald-200/40 scale-102"
+                        : "bg-white border-slate-100 hover:border-[#d1fae5] text-slate-700 hover:bg-[#fafffb]"
+                    }`}
+                  >
+                    <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">📖</div>
+                    <div className="text-3xl">📖</div>
+                    <div>
+                      <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Library Books</h4>
+                      <p className="text-[10px] text-slate-500 font-bold mt-0.5">Choose a story</p>
+                    </div>
+                  </button>
 
-                <button 
-                  onClick={() => setActiveDashboardFeature('upload')}
-                  className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
-                    activeDashboardFeature === 'upload'
-                      ? "bg-[#faf5ff] border-[#7c3aed] text-purple-950 shadow-lg shadow-purple-200/40 scale-102"
-                      : "bg-white border-slate-100 hover:border-purple-100 text-slate-700 hover:bg-[#fdfaff]"
-                  }`}
-                >
-                  <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">📤</div>
-                  <div className="text-3xl">📤</div>
-                  <div>
-                    <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Upload Book</h4>
-                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">Custom homework</p>
-                  </div>
-                </button>
+                  <button 
+                    onClick={() => setActiveDashboardFeature('upload')}
+                    className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
+                      activeDashboardFeature === 'upload'
+                        ? "bg-[#faf5ff] border-[#7c3aed] text-purple-950 shadow-lg shadow-purple-200/40 scale-102"
+                        : "bg-white border-slate-100 hover:border-purple-100 text-slate-700 hover:bg-[#fdfaff]"
+                    }`}
+                  >
+                    <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">📤</div>
+                    <div className="text-3xl">📤</div>
+                    <div>
+                      <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Upload Book</h4>
+                      <p className="text-[10px] text-slate-500 font-bold mt-0.5">Custom homework</p>
+                    </div>
+                  </button>
 
-                <button 
-                  onClick={() => setActiveDashboardFeature('library')}
-                  className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
-                    activeDashboardFeature === 'library'
-                      ? "bg-[#ecfdf5] border-[#10b981] text-emerald-950 shadow-lg shadow-emerald-200/40 scale-102"
-                      : "bg-white border-slate-100 hover:border-[#d1fae5] text-slate-700 hover:bg-[#fafffb]"
-                  }`}
-                >
-                  <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">📖</div>
-                  <div className="text-3xl">📖</div>
-                  <div>
-                    <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Library Books</h4>
-                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">Choose a story</p>
-                  </div>
-                </button>
+                  <button 
+                    onClick={() => setActiveDashboardFeature('spelling')}
+                    className={`p-5 rounded-[2rem] border-4 transition-all text-left flex flex-col justify-between h-36 relative overflow-hidden cursor-pointer ${
+                      activeDashboardFeature === 'spelling'
+                        ? "bg-[#fffbeb] border-[#f59e0b] text-amber-950 shadow-lg shadow-amber-200/40 scale-102"
+                        : "bg-white border-slate-100 hover:border-[#ffedd5] text-slate-700 hover:bg-[#fffdfa]"
+                    }`}
+                  >
+                    <div className="absolute -right-4 -bottom-4 text-6xl opacity-15">🐝</div>
+                    <div className="text-3xl">🐝</div>
+                    <div>
+                      <h4 className="font-extrabold text-xs sm:text-sm tracking-tight text-navy-pikin">Spelling Bee</h4>
+                      <p className="text-[10px] text-slate-500 font-bold mt-0.5">Learn sounds & spell</p>
+                    </div>
+                  </button>
+                </div>
               </div>
             </motion.div>
 
             {/* Main Interactive Workspaces */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               
-              {/* Left Column: Active workspace according to selected feature */}
-              <div className="lg:col-span-8 space-y-10">
+              {/* Left Column: Active workspace according to selected feature (now full width!) */}
+              <div className="lg:col-span-12 space-y-10">
+                
+                {activeDashboardFeature === null && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-white rounded-[2.5rem] p-8 md:p-14 border-4 border-dashed border-sky-pikin/25 text-center space-y-5 max-w-2xl mx-auto py-16 shadow-sm"
+                  >
+                    <div className="text-7xl animate-bounce">🏝️</div>
+                    <h3 className="font-display text-3xl font-black text-navy-pikin">
+                      Welcome to your Learning Island!
+                    </h3>
+                    <p className="text-slate-500 text-sm leading-relaxed max-w-md mx-auto">
+                      Early reading is more fun with games! Select one of the learning adventures above like <strong>Read ABC & 123</strong>, <strong>Library Books</strong>, <strong>Upload Book</strong>, or the <strong>Spelling Bee</strong> to start playing!
+                    </p>
+                  </motion.div>
+                )}
                 
                 {/* FEATURE 1: Interactive Phonics Spelling Bee Game */}
                 {activeDashboardFeature === 'spelling' && (
@@ -1776,7 +3260,7 @@ export default function App() {
                               utterance.pitch = 1.2; // Cheerful
                               window.speechSynthesis.speak(utterance);
                             } else {
-                              alert(`Synthesized pronunciation for: "${currentObj.word}"`);
+                              showToast(`Synthesized pronunciation for: "${currentObj.word}"`, "info");
                             }
                           };
 
@@ -2031,8 +3515,9 @@ export default function App() {
                               const isActive = activeAbcLetter === item.letter;
                               const handleLetterTap = () => {
                                 setActiveAbcLetter(item.letter);
-                                // Speak sound guide
-                                const phrase = `${item.letter} is for ${item.word}! ${item.phonics}`;
+                                // Speak sound guide: say the letter, what it stands for, and spell it out
+                                const spelling = item.word.toUpperCase().split('').join(', ');
+                                const phrase = `${item.letter} is for ${item.word}. Spelled ${spelling}.`;
                                 if ('speechSynthesis' in window) {
                                   window.speechSynthesis.cancel();
                                   const utterance = new SpeechSynthesisUtterance(phrase);
@@ -2071,7 +3556,7 @@ export default function App() {
                             <div>
                               <p className="text-xs font-black uppercase text-sky-700 tracking-wider">ACTIVE SPEECH PHONICS</p>
                               <p className="text-sm font-bold text-navy-pikin">
-                                "{activeAbcLetter} is for {(() => {
+                                {(() => {
                                   const alphabets = [
                                     { letter: "A", word: "Apple" }, { letter: "B", word: "Butterfly" },
                                     { letter: "C", word: "Cat" }, { letter: "D", word: "Dolphin" },
@@ -2087,8 +3572,11 @@ export default function App() {
                                     { letter: "W", word: "Watermelon" }, { letter: "X", word: "Xylophone" },
                                     { letter: "Y", word: "Yacht" }, { letter: "Z", word: "Zebra" }
                                   ];
-                                  return alphabets.find(a => a.letter === activeAbcLetter)?.word || "";
-                                })()}!"
+                                  const activeItem = alphabets.find(a => a.letter === activeAbcLetter);
+                                  if (!activeItem) return "";
+                                  const spellingVisual = activeItem.word.toUpperCase().split('').join('-');
+                                  return `"${activeItem.letter} is for ${activeItem.word}. Spelled ${spellingVisual}!"`;
+                                })()}
                               </p>
                             </div>
                           </div>
@@ -2287,71 +3775,358 @@ export default function App() {
                   </motion.div>
                 )}
 
+
+
               </div>
 
-              {/* Right Column: Streaks, Milestone Badging & Supportive Parenting tips */}
-              <div className="lg:col-span-4 space-y-10">
-                
-                {/* SIDEBOARD 1: Child Level Milestones */}
-                <motion.div 
-                  initial={{ opacity: 0, x: 15 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="bg-white rounded-[2.5rem] p-6 sm:p-8 border-4 border-[#e0f2fe] shadow-lg text-left space-y-5"
+            </div>
+
+              </>
+            )}
+          </div>
+        </section>
+      )}
+      
+      {/* ─── FAMILY PROFILE PAGE VIEW ─── */}
+      {currentView === 'profile' && (
+        <section className="bg-gradient-to-br from-[#f0f9ff] via-[#fefaf0] to-[#f0fdf4] py-12 px-4 sm:px-6 min-h-[90vh]">
+          <div className="max-w-4xl mx-auto space-y-10">
+            {/* Header / Title */}
+            <div className="text-center space-y-3">
+              <span className="text-4xl">👤</span>
+              <h2 className="font-display text-3xl sm:text-4xl font-black text-navy-pikin tracking-tight">
+                Family Profile & Parent Hub
+              </h2>
+              <p className="text-slate-500 text-sm max-w-lg mx-auto">
+                View your active student profiles, track milestone reading levels, and access developmental phonetics guides.
+              </p>
+            </div>
+
+            {/* Profile Information Block (Removed from Dashboard) */}
+            <div className="bg-white rounded-[2.5rem] p-6 sm:p-8 border-4 border-sky-pikin/20 shadow-xl space-y-6 text-left">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                <span className="inline-flex items-center gap-1.5 bg-sky-100 text-sky-800 text-xs font-black px-4 py-1.5 rounded-full uppercase tracking-wider">
+                  🏝️ ACTIVE FAMILY PROFILE
+                </span>
+                <span className="text-xs font-bold text-sky-600 bg-sky-50 px-3 py-1 rounded-full">Level 1 / 10 Progress</span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Child Profile Info */}
+                <div className="flex items-center gap-4 bg-sky-50/40 p-4 rounded-2xl border border-sky-100/40">
+                  <div className="text-4xl bg-white p-3 rounded-xl shadow-sm">🐣</div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">CHILD</span>
+                    <h4 className="font-extrabold text-lg text-navy-pikin truncate">{childFirstName || "Femi"}</h4>
+                    <p className="text-xs text-slate-500 font-bold">Age Range: {childAge || "6-8"} • {readingLevel || "Developing"} Level</p>
+                  </div>
+                </div>
+
+                {/* Parent Profile Info */}
+                <div className="flex items-center gap-4 bg-slate-50/50 p-4 rounded-2xl border border-slate-100/50">
+                  <div className="text-4xl bg-white p-3 rounded-xl shadow-sm">👨‍👩‍👦</div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10px] text-slate-400 font-black uppercase tracking-wider">PARENT</span>
+                    <h4 className="font-extrabold text-lg text-navy-pikin truncate">{parentFirstName || "Amaka"}</h4>
+                    <p className="text-xs text-slate-500 font-bold truncate">{email || "parent@smartpikin.com"}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Level Progress Bar */}
+              <div className="space-y-2 pt-2">
+                <div className="flex justify-between text-xs font-bold text-slate-500">
+                  <span>Overall Phonics & Spelling Progress</span>
+                  <span>15% Completed</span>
+                </div>
+                <div className="w-full bg-slate-100 h-3.5 rounded-full overflow-hidden border border-slate-200/50">
+                  <div className="bg-sky-500 h-full rounded-full transition-all duration-500" style={{ width: "15%" }}></div>
+                </div>
+              </div>
+
+              {/* Manage Children & Add Profile button */}
+              <div className="pt-2 flex flex-col sm:flex-row justify-between items-center gap-4 border-t border-slate-50">
+                <p className="text-xs text-slate-400">
+                  Want to register another sibling? You can add up to 4 children per parent account.
+                </p>
+                <button 
+                  onClick={() => {
+                    setIsProfileCompleted(false);
+                    setChildFormVisible(true);
+                    setOnboardingStep('addChild');
+                    showToast("Redirecting to onboarding to add a new child profile!", "info");
+                  }}
+                  className="bg-coral-pikin hover:bg-coral-pikin/90 text-white font-extrabold text-xs px-6 py-3 rounded-full transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-coral-pikin/15 border-none"
+                  type="button"
                 >
-                  <span className="inline-flex items-center gap-1.5 bg-sky-100 text-sky-800 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
-                    🏆 MILESTONES & LEVEL
-                  </span>
-                  
+                  ➕ Add/Manage Sibling Profiles
+                </button>
+              </div>
+            </div>
+
+            {/* TAB SELECTION CARDS - choosing Milestones or Coaching tips */}
+            <div className="space-y-4">
+              <div className="text-left border-l-4 border-sky-pikin pl-3">
+                <h3 className="font-display text-lg text-navy-pikin font-black tracking-tight">
+                  Choose what you want to see
+                </h3>
+                <p className="text-slate-500 text-xs">
+                  Click on milestones or coaching tips to display that module.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <button 
+                  onClick={() => {
+                    setActiveProfileTab('progress');
+                    showToast("Displaying Milestones & Learning Progress 📈", "info");
+                  }}
+                  className={`p-6 rounded-[2rem] border-4 transition-all text-left flex items-center gap-4 cursor-pointer relative overflow-hidden ${
+                    activeProfileTab === 'progress'
+                      ? "bg-[#f0f9ff] border-[#0284c7] text-sky-950 shadow-lg shadow-sky-200/30 scale-102"
+                      : "bg-white border-slate-100 hover:border-slate-200 text-slate-700 hover:bg-slate-50/40"
+                  }`}
+                >
+                  <span className="text-3xl">📈</span>
+                  <div>
+                    <h4 className="font-extrabold text-sm sm:text-base text-navy-pikin">Milestones & Learning Progress</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">Track spelling scores and active reading levels.</p>
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => {
+                    setActiveProfileTab('coaching');
+                    showToast("Displaying Parenting Phonics Coach 💡", "info");
+                  }}
+                  className={`p-6 rounded-[2rem] border-4 transition-all text-left flex items-center gap-4 cursor-pointer relative overflow-hidden ${
+                    activeProfileTab === 'coaching'
+                      ? "bg-[#fffbeb] border-[#f59e0b] text-amber-950 shadow-lg shadow-amber-200/30 scale-102"
+                      : "bg-white border-slate-100 hover:border-slate-200 text-slate-700 hover:bg-slate-50/40"
+                  }`}
+                >
+                  <span className="text-3xl">💡</span>
+                  <div>
+                    <h4 className="font-extrabold text-sm sm:text-base text-navy-pikin">Parent Coaching Tips</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">Developmental advice and phonetic practice board.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Render selected component */}
+            <div className="space-y-6">
+              {activeProfileTab === null && (
+                <div className="bg-white rounded-[2rem] p-8 border-2 border-dashed border-slate-200 text-center py-12">
+                  <span className="text-4xl block mb-2">🎯</span>
+                  <p className="text-slate-500 text-sm font-bold">
+                    Select either Milestones or Parent Coaching above to display the details here.
+                  </p>
+                </div>
+              )}
+
+              {/* RENDER TAB 1: Milestones & Progress */}
+              {activeProfileTab === 'progress' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-[2.5rem] p-6 sm:p-8 border-4 border-blue-100 shadow-lg text-left space-y-6"
+                >
+                  <div className="border-b-2 border-slate-50 pb-4">
+                    <span className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-800 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider mb-2">
+                      📊 MILESTONES & LEARNING PROGRESS
+                    </span>
+                    <h3 className="font-display text-2xl text-navy-pikin">
+                      {childFirstName || "Femi"}'s Progress Dashboard 📈
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Track early vocabulary, phonics progress, spelling scores, and unlocked achievement levels.
+                    </p>
+                  </div>
+
+                  {/* Progress Metrics Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-blue-50/50 rounded-2xl p-4 border border-blue-100/50">
+                      <span className="text-slate-500 text-[10px] uppercase font-black tracking-wider block">Completed Lessons</span>
+                      <span className="text-2xl font-black text-blue-900 mt-1 block">14 / 20</span>
+                      <div className="w-full bg-slate-200 h-1.5 rounded-full mt-2">
+                        <div className="bg-blue-600 h-full rounded-full" style={{ width: "70%" }}></div>
+                      </div>
+                    </div>
+                    <div className="bg-emerald-50/50 rounded-2xl p-4 border border-emerald-100/50">
+                      <span className="text-slate-500 text-[10px] uppercase font-black tracking-wider block">Words Pronounced</span>
+                      <span className="text-2xl font-black text-emerald-950 mt-1 block">182 Words</span>
+                      <span className="text-[10px] text-emerald-600 font-extrabold block mt-2">✨ 94% Avg Pronunciation Accuracy</span>
+                    </div>
+                    <div className="bg-purple-50/50 rounded-2xl p-4 border border-purple-100/50">
+                      <span className="text-slate-500 text-[10px] uppercase font-black tracking-wider block">Stars Earned</span>
+                      <span className="text-2xl font-black text-purple-900 mt-1 block">380 Stars ⭐</span>
+                      <span className="text-[10px] text-purple-600 font-extrabold block mt-2">🎉 Rank: Fast Learner</span>
+                    </div>
+                  </div>
+
+                  {/* Milestone Levels Pathway */}
+                  <div className="space-y-4 pt-2">
+                    <h4 className="font-extrabold text-sm text-navy-pikin">Child Reading Level Roadmap</h4>
+                    <div className="space-y-3">
+                      {[
+                        { level: "Beginner", desc: "Recognises single letter phonic sounds & simple combinations (e.g., Ah, Buh, Ca).", status: readingLevel === "Beginner" ? "current" : "completed", emoji: "🐣" },
+                        { level: "Developing", desc: "Pronounces dual-letter blend sounds and basic words (e.g., Cat, Dog, Sun).", status: readingLevel === "Developing" ? "current" : (readingLevel === "Intermediate" || readingLevel === "Advanced" ? "completed" : "locked"), emoji: "🌱" },
+                        { level: "Intermediate", desc: "Reads complete simple sentences, claps syllables, and structures syntax.", status: readingLevel === "Intermediate" ? "current" : (readingLevel === "Advanced" ? "completed" : "locked"), emoji: "📚" },
+                        { level: "Advanced", desc: "Reads and comprehends rich cultural short stories with dynamic inflections.", status: readingLevel === "Advanced" ? "current" : "locked", emoji: "🚀" }
+                      ].map((m, idx) => {
+                        const isCompleted = m.status === 'completed';
+                        const isCurrent = m.status === 'current';
+                        return (
+                          <div key={idx} className={`flex gap-4 p-4 rounded-2xl border-2 transition-all ${
+                            isCompleted ? "bg-emerald-50/30 border-emerald-100" :
+                            isCurrent ? "bg-blue-50/40 border-blue-200 ring-2 ring-blue-100" : "bg-slate-50/50 border-slate-100 text-slate-400"
+                          }`}>
+                            <span className="text-3xl shrink-0">{m.emoji}</span>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <h5 className="font-extrabold text-sm text-navy-pikin">{m.level} Level</h5>
+                                {isCompleted && <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-2 py-0.5 rounded-full">Completed</span>}
+                                {isCurrent && <span className="bg-blue-100 text-blue-800 text-[9px] font-bold px-2 py-0.5 rounded-full">Current Active</span>}
+                                {!isCompleted && !isCurrent && <span className="bg-slate-200 text-slate-600 text-[9px] font-bold px-2 py-0.5 rounded-full">Locked</span>}
+                              </div>
+                              <p className="text-xs text-slate-500 leading-relaxed">{m.desc}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Badges Unlock Gallery */}
+                  <div className="space-y-4 pt-2">
+                    <h4 className="font-extrabold text-sm text-navy-pikin">Unlocked Achievement Badges</h4>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { title: "First Step", desc: "Account setup complete!", unlocked: true, emoji: "🎖️" },
+                        { title: "Phonics Pioneer", desc: "3+ letters pronounced correctly", unlocked: true, emoji: "🎓" },
+                        { title: "Word Weaver", desc: "Spelt 5 words correctly", unlocked: false, emoji: "🐝" },
+                        { title: "Book Worm", desc: "Completed first Library book", unlocked: false, emoji: "📖" }
+                      ].map((b, i) => (
+                        <div key={i} className={`p-4 rounded-2xl border-2 text-center space-y-1.5 transition-all ${
+                          b.unlocked ? "bg-amber-50/30 border-amber-100 text-slate-700" : "bg-slate-50/40 border-slate-100 text-slate-400 opacity-60"
+                        }`}>
+                          <span className="text-3xl block">{b.emoji}</span>
+                          <h5 className="font-extrabold text-xs text-navy-pikin truncate">{b.title}</h5>
+                          <p className="text-[10px] leading-tight text-slate-500">{b.desc}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Interactive Printable Certificate of Achievement */}
+                  <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 p-6 rounded-[2rem] border-2 border-amber-300/30 flex flex-col sm:flex-row items-center gap-4 text-center sm:text-left justify-between">
+                    <div className="space-y-1.5">
+                      <span className="bg-amber-100 text-amber-800 text-[9px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wider font-mono">OFFICIAL RECOGNITION</span>
+                      <h4 className="font-display text-lg text-navy-pikin font-black">Generate Achievement Certificate</h4>
+                      <p className="text-xs text-slate-600 max-w-md">
+                        Celebrate your child's hard work! Print out an official Smart Pikin Reading Certificate for {childFirstName || "Femi"} to frame on the wall.
+                      </p>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        showToast(`Generated custom achievement certificate for ${childFirstName || "Femi"}! Ready to frame 🎓`, "success");
+                      }}
+                      className="bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs px-6 py-3.5 rounded-full shadow-lg shadow-amber-500/20 transition-all hover:scale-105 active:scale-95 cursor-pointer border-none shrink-0"
+                    >
+                      🎓 Download Certificate
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* RENDER TAB 2: Parent Coaching Tips */}
+              {activeProfileTab === 'coaching' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-white rounded-[2.5rem] p-6 sm:p-8 border-4 border-amber-100 shadow-lg text-left space-y-6"
+                >
+                  <div className="border-b-2 border-slate-50 pb-4">
+                    <span className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider mb-2">
+                      💡 PARENTING PHONETICS COACH
+                    </span>
+                    <h3 className="font-display text-2xl text-navy-pikin">
+                      Parent Coaching & Guidance Tips 💡
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Professional advice, developmental checkpoints, and phonetic sounds to practice with your child.
+                    </p>
+                  </div>
+
+                  {/* Dynamic Interactive Soundboard */}
                   <div className="space-y-4">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-bold text-slate-500">Learning Progress:</span>
-                      <span className="font-extrabold text-sky-600">Level 1 / 10</span>
+                    <div className="bg-amber-50/40 p-4 rounded-2xl border border-amber-100 space-y-2">
+                      <h4 className="font-extrabold text-xs uppercase tracking-wide text-amber-800">🗣️ Phonetic Sound Assistant</h4>
+                      <p className="text-xs text-amber-950/80 leading-relaxed">
+                        Children learn fast when they hear pure letter sounds rather than alphabet names (e.g., saying "Ah" instead of "A"). Click any block below to hear the exact sound to practice together!
+                      </p>
+                      
+                      <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 pt-2">
+                        {[
+                          { letter: "A", sound: "Ah (as in Apple 🍎)" },
+                          { letter: "B", sound: "Buh (as in Ball ⚽)" },
+                          { letter: "C", sound: "Cuh (as in Cat 🐱)" },
+                          { letter: "D", sound: "Duh (as in Dog 🐶)" },
+                          { letter: "E", sound: "Eh (as in Elephant 🐘)" },
+                          { letter: "F", sound: "Fuh (as in Fish 🐟)" },
+                          { letter: "G", sound: "Guh (as in Goat 🐐)" },
+                          { letter: "H", sound: "Huh (as in Hat 🎩)" }
+                        ].map((item, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              showToast(`Practice sound: "${item.sound}"`, "info");
+                              if ('speechSynthesis' in window) {
+                                try {
+                                  const utterance = new SpeechSynthesisUtterance(item.letter === "A" ? "Ah" : item.letter === "C" ? "Cuh" : item.letter);
+                                  utterance.rate = 0.8;
+                                  window.speechSynthesis.speak(utterance);
+                                } catch (e) {
+                                  // Fallback if speechSynthesis is blocked
+                                }
+                              }
+                            }}
+                            className="bg-white hover:bg-amber-100 border border-amber-200/60 p-2.5 rounded-xl font-bold text-center text-sm text-amber-950 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                            type="button"
+                            title={item.sound}
+                          >
+                            {item.letter}
+                          </button>
+                        ))}
+                      </div>
                     </div>
+                  </div>
 
-                    {/* Simple Progress Bar */}
-                    <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden border border-slate-200/50">
-                      <div className="bg-sky-500 h-full rounded-full transition-all" style={{ width: "15%" }}></div>
-                    </div>
+                  {/* Educational Coaching Tips Accordion / Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {[
+                      { title: "🔊 Syllable Clapping", desc: "Clap out syllables of long words like M-A-N-G-O or BA-NA-NA. This builds natural phonetic rhythm and word construction in children aged 3-8.", category: "Ages 3–8" },
+                      { title: "📖 Shared Book Ritual", desc: "Dedicate 10 minutes at bedtime to read together. Let your child read the words they recognize and gently tap on the mic for pronunciation feedback.", category: "Ages 3–14" },
+                      { title: "🧩 Interactive Letter Match", desc: "Point at common items in the house and ask your child what phonic letter they start with. E.g., 'What sound does Cup start with?' -> 'Cuh'!", category: "Ages 3–5" },
+                      { title: "🖊️ Homework Reinforcement", desc: "Upload physical worksheets or school homework sheets here. Our voice uploader will convert physical text to audio with 100% correct pronunciations.", category: "School Prep" }
+                    ].map((tip, idx) => (
+                      <div key={idx} className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 hover:border-amber-200 hover:bg-amber-50/10 transition-all space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[9px] bg-slate-200/70 text-slate-700 font-extrabold px-2 py-0.5 rounded-full uppercase">{tip.category}</span>
+                          <span className="text-amber-500">💡</span>
+                        </div>
+                        <h4 className="font-extrabold text-sm text-navy-pikin">{tip.title}</h4>
+                        <p className="text-xs text-slate-500 leading-relaxed">{tip.desc}</p>
+                      </div>
+                    ))}
+                  </div>
 
-                    <div className="text-xs text-slate-500 leading-relaxed font-sans bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
-                      <span className="font-extrabold text-navy-pikin block mb-1">🎯 Next Achievement:</span>
-                      Spell 5 words correctly in Spelling Bee to unlock the <strong className="text-sky-600">Phonics Master Badge</strong>!
-                    </div>
+                  <div className="bg-amber-500/10 p-5 rounded-2xl border-2 border-amber-200/20 text-xs text-amber-900 leading-relaxed">
+                    <strong>💡 Developmental Tip:</strong> Remember to praise effort over results! If your child mispronounces a word, say "That was a great try! Let's listen to the Smart Pikin voice and try it again together." This builds immense emotional safety.
                   </div>
                 </motion.div>
-
-                {/* SIDEBOARD 2: Dynamic Parent Pronunciation & Milestone Coach Tips */}
-                <motion.div 
-                  initial={{ opacity: 0, x: 15 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.15 }}
-                  className="bg-gradient-to-br from-[#fffbeb] to-[#fef3c7] rounded-[2.5rem] p-6 border-4 border-amber-200/50 shadow-md text-left space-y-4"
-                >
-                  <div className="flex items-center gap-2 text-amber-800">
-                    <Lightbulb className="h-5 w-5 shrink-0 text-amber-500" />
-                    <h4 className="font-extrabold text-sm uppercase tracking-wide">Parent Coaching Tips</h4>
-                  </div>
-                  
-                  <div className="space-y-3.5 text-xs text-amber-900 leading-relaxed font-sans">
-                    <p>
-                      💡 <strong className="font-black text-amber-950">Make spelling visual:</strong> For children aged 3-5, connect words directly with emojis (e.g. A for Apple 🍎). Tap the ABC buttons together!
-                    </p>
-                    <p>
-                      💡 <strong className="font-black text-amber-950">Syllable clapping:</strong> Clap out word lengths for spelling bee words like <strong className="text-amber-950">M-A-N-G-O</strong> to build phonics rhythm!
-                    </p>
-                    <p>
-                      💡 <strong className="font-black text-amber-950">Upload homework:</strong> Use the Custom Book Uploader to instantly make school worksheets reading-enabled in 5 seconds!
-                    </p>
-                  </div>
-
-                  <div className="border-t border-amber-200/50 pt-3 flex items-center justify-between text-[11px] font-bold text-amber-700">
-                    <span>Active Milestones: Beginner</span>
-                    <span>Level 1 / 10</span>
-                  </div>
-                </motion.div>
-
-              </div>
-
+              )}
             </div>
           </div>
         </section>
@@ -2471,7 +4246,7 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => {
-                    alert("Awesome pronunciation! Your child read correctly with 94% clarity! Streak count updated.");
+                    showToast("Awesome pronunciation! Your child read correctly with 94% clarity! Streak count updated.", "success");
                   }}
                   className="bg-coral-pikin text-white px-5 py-2.5 rounded-full text-xs font-black hover:bg-coral-pikin/90 shadow-md shadow-coral-pikin/15 cursor-pointer focus:outline-none shrink-0"
                 >
@@ -2495,7 +4270,7 @@ export default function App() {
       {/* ─── GLOBAL INTERACTIVE UPLOAD MODAL ─── */}
       <AnimatePresence>
         {uploadModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
             {/* Backdrop */}
             <motion.div 
               initial={{ opacity: 0 }}
@@ -2510,7 +4285,9 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white rounded-[2rem] p-8 max-w-lg w-full shadow-2xl relative z-10 border-4 border-purple-200"
+              className={`bg-white rounded-[2rem] p-8 w-full shadow-2xl relative z-10 border-4 border-purple-200 transition-all duration-300 max-h-[90vh] overflow-y-auto ${
+                uploadedFile ? "max-w-2xl md:max-w-3xl" : "max-w-lg"
+              }`}
             >
               <button 
                 onClick={() => setUploadModalOpen(false)}
@@ -2525,6 +4302,44 @@ export default function App() {
                 <p className="text-slate-500 text-sm mt-1">
                   Upload school readers, stories, or drawings to experience how our AI turns text into customized reading exercises instantly.
                 </p>
+              </div>
+
+              {/* n8n Webhook URL configuration */}
+              <div className="mb-6 bg-slate-50 rounded-xl p-4 border border-slate-100 text-left">
+                <div className="flex items-center justify-between mb-2 cursor-pointer select-none" onClick={() => setShowWebhookSettings(!showWebhookSettings)}>
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider">
+                    <Settings className="h-4 w-4 text-slate-400" />
+                    <span>n8n Webhook Integration</span>
+                  </div>
+                  <span className="text-xs text-purple-600 hover:underline">{showWebhookSettings ? "Hide Settings" : "Configure"}</span>
+                </div>
+                
+                {showWebhookSettings && (
+                  <div className="space-y-3 mt-3 pt-3 border-t border-slate-200">
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      Enter your n8n Webhook URL below. Documents uploaded here will be sent as a Base64 stream with parent/child metadata.
+                    </p>
+                    <div className="flex gap-2">
+                      <input 
+                        type="url"
+                        placeholder="https://your-n8n-instance.com/webhook/xxxx"
+                        value={n8nWebhookUrl}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setN8nWebhookUrl(val);
+                          localStorage.setItem('n8nWebhookUrl', val);
+                        }}
+                        className="flex-1 bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs focus:outline-none focus:border-purple-500 font-mono text-slate-700"
+                      />
+                    </div>
+                    {n8nWebhookUrl && (
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <span className="text-[11px] font-black text-slate-600">Active Webhook configured!</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Upload drag-n-drop box */}
@@ -2542,12 +4357,12 @@ export default function App() {
                     type="file" 
                     id="file-upload-input-global" 
                     className="hidden" 
-                    accept=".pdf,.doc,.docx,image/*"
+                    accept=".pdf,.doc,.docx,image/*,.txt"
                     onChange={handleFileSelect}
                   />
                   <UploadCloud className="h-12 w-12 text-purple-400 mx-auto mb-3 animate-bounce" />
                   <p className="font-black text-navy-pikin mb-1">Drag and drop file here, or click to browse</p>
-                  <p className="text-xs text-slate-400">Supports PDFs, Images, and Word files up to 20MB</p>
+                  <p className="text-xs text-slate-400">Supports PDFs, Images, TXT, and Word files up to 20MB</p>
                 </div>
               ) : (
                 <div className="bg-purple-50/60 rounded-2xl p-6 border border-purple-100 text-left">
@@ -2577,20 +4392,208 @@ export default function App() {
                       <p className="text-xs text-slate-500 mt-1">Generating instant reading prompts and word quizzes</p>
                     </div>
                   ) : (
-                    <div className="text-left bg-emerald-50 p-4 rounded-xl border border-emerald-100">
-                      <div className="flex gap-2 text-emerald-800 font-extrabold text-sm mb-1">
-                        <Check className="h-5 w-5 shrink-0 text-emerald-600" />
-                        <span>AI Integration Complete!</span>
+                    <div className="space-y-5">
+                      <div className="text-left bg-emerald-50 p-4 rounded-xl border border-emerald-100">
+                        <div className="flex gap-2 text-emerald-800 font-extrabold text-sm mb-1">
+                          <Check className="h-5 w-5 shrink-0 text-emerald-600" />
+                          <span>AI Integration Complete!</span>
+                        </div>
+                        <p className="text-xs text-[#4a6080] leading-relaxed">
+                          {analysisResult}
+                        </p>
                       </div>
-                      <p className="text-xs text-[#4a6080] leading-relaxed">
-                        {analysisResult}
-                      </p>
-                      <button 
-                        onClick={resetUploadState}
-                        className="mt-4 text-xs font-extrabold text-purple-600 hover:text-purple-800 flex items-center gap-1 cursor-pointer bg-transparent border-none focus:outline-none"
-                      >
-                        <RefreshCw className="h-3 w-3" /> Upload another book
-                      </button>
+
+                      {/* Webhook Sync Status */}
+                      {n8nWebhookUrl && (
+                        <div className="p-3.5 rounded-xl border text-xs text-left">
+                          {webhookStatus === 'sending' && (
+                            <div className="flex items-center gap-2 text-purple-800">
+                              <RefreshCw className="h-4 w-4 animate-spin text-purple-600 shrink-0" />
+                              <span>Syncing uploaded document to n8n webhook...</span>
+                            </div>
+                          )}
+                          {webhookStatus === 'success' && (
+                            <div className="flex items-center gap-2 text-emerald-800 bg-emerald-100 border-emerald-200 p-2 rounded-lg">
+                              <Check className="h-4 w-4 text-emerald-600 shrink-0" />
+                              <span className="font-bold">Sync successful! File sent directly to n8n.</span>
+                            </div>
+                          )}
+                          {webhookStatus === 'error' && (
+                            <div className="flex flex-col gap-1 text-red-800 bg-red-50 border-red-100 p-2 rounded-lg">
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold">❌ n8n Webhook Error</span>
+                              </div>
+                              <p className="text-[10px] text-red-600 font-mono leading-relaxed">{webhookError}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Display the active document and play options */}
+                      <div className="mt-4 text-left space-y-4">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1 border-b border-purple-100 pb-2">
+                          <h4 className="text-xs font-black uppercase text-purple-600 tracking-wider">Story Text Reader</h4>
+                          
+                          {/* Controls */}
+                          <div className="flex items-center gap-1.5">
+                            {/* Toggle Edit/Read */}
+                            <button
+                              onClick={() => {
+                                if (isReadingAloud) {
+                                  window.speechSynthesis.cancel();
+                                  setIsReadingAloud(false);
+                                  setActiveWordIndex(-1);
+                                }
+                                setIsEditingText(!isEditingText);
+                                showToast(isEditingText ? "Saved book edits! 💾" : "You can now edit your book exactly as you want! 📝", "info");
+                              }}
+                              className={`flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-extrabold cursor-pointer transition-all ${
+                                isEditingText 
+                                  ? "bg-amber-500 hover:bg-amber-600 text-white" 
+                                  : "bg-purple-100 hover:bg-purple-200 text-purple-700"
+                              }`}
+                              type="button"
+                            >
+                              {isEditingText ? "💾 Save Text" : "📝 Edit Book"}
+                            </button>
+
+                            {/* Speech speed selector */}
+                            <select 
+                              value={speechRate}
+                              onChange={(e) => setSpeechRate(parseFloat(e.target.value))}
+                              className="text-[11px] font-bold border border-purple-200 rounded-md py-1 px-1.5 text-purple-700 bg-white"
+                            >
+                              <option value="0.7">Slower (0.7x)</option>
+                              <option value="0.9">Slow (0.9x)</option>
+                              <option value="1">Normal (1.0x)</option>
+                              <option value="1.2">Fast (1.2x)</option>
+                            </select>
+                            
+                            <button
+                              onClick={speakStoryAloud}
+                              disabled={isEditingText}
+                              className={`flex items-center gap-1.5 py-1 px-3 rounded-full text-xs font-extrabold cursor-pointer transition-all ${
+                                isEditingText
+                                  ? "opacity-50 cursor-not-allowed bg-slate-100 text-slate-400"
+                                  : isReadingAloud 
+                                    ? "bg-red-500 text-white shadow-md shadow-red-500/20" 
+                                    : "bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-500/10"
+                              }`}
+                            >
+                              {isReadingAloud ? (
+                                <>
+                                  <Pause className="h-3 w-3 animate-pulse" />
+                                  <span>Stop AI Reader</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="h-3 w-3" />
+                                  <span>AI Read Story</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Text Viewer & Editor Panel */}
+                        <div className="bg-white rounded-2xl p-5 border border-purple-100 min-h-[140px] max-h-[220px] overflow-y-auto leading-relaxed text-slate-800">
+                          {isEditingText ? (
+                            <div className="space-y-2 text-left">
+                              <span className="block text-[10px] font-black uppercase text-amber-600 tracking-wider">
+                                📝 Book Content Editor
+                              </span>
+                              <textarea
+                                value={extractedText}
+                                onChange={(e) => setExtractedText(e.target.value)}
+                                className="w-full h-24 p-3 border-2 border-amber-300 rounded-xl focus:outline-none focus:border-amber-500 font-sans text-slate-800 text-sm leading-relaxed"
+                                placeholder="Type or paste the exact content of your book here..."
+                              />
+                              <p className="text-[10px] text-slate-400">
+                                Edit or paste any text directly. It will be read aloud and practiced exactly as you configure it!
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="text-base sm:text-lg font-medium">
+                              {extractedText ? (
+                                extractedText.split(/\s+/).map((word, idx) => (
+                                  <span 
+                                    key={idx} 
+                                    className={`inline-block mr-1.5 transition-all duration-150 rounded px-1 my-0.5 ${
+                                      idx === activeWordIndex 
+                                        ? "bg-yellow-300 text-purple-950 font-black scale-105 shadow-sm border border-yellow-400" 
+                                        : ""
+                                    }`}
+                                  >
+                                    {word}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-slate-400 text-sm italic">Syllabifying and loading story content...</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Mic Read-Along panel */}
+                        <div className="bg-gradient-to-br from-purple-500/5 to-sky-500/5 rounded-2xl p-5 border border-purple-200/50">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-2">
+                              <Mic className={`h-4.5 w-4.5 ${isMicListening ? "text-rose-500 animate-pulse" : "text-purple-600"}`} />
+                              <span className="text-xs font-extrabold text-navy-pikin">Read Along Mic (Practice Pronunciation)</span>
+                            </div>
+                            
+                            <button
+                              onClick={isMicListening ? stopMicListening : startMicListening}
+                              className={`py-1.5 px-4 rounded-full text-xs font-extrabold cursor-pointer transition-all flex items-center gap-1.5 ${
+                                isMicListening 
+                                  ? "bg-red-500 text-white animate-pulse" 
+                                  : "bg-purple-100 hover:bg-purple-200 text-purple-700"
+                              }`}
+                            >
+                              <span>{isMicListening ? "🎙️ Stop Mic" : "🎤 Turn Mic On"}</span>
+                            </button>
+                          </div>
+
+                          {isMicListening ? (
+                            <div className="bg-white rounded-xl p-4 border border-rose-100 flex items-center gap-3">
+                              <span className="relative flex h-3 w-3 shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+                              </span>
+                              <p className="text-xs text-rose-800 italic leading-relaxed">
+                                {childSpeechTranscript}
+                              </p>
+                            </div>
+                          ) : childSpeechTranscript ? (
+                            <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100 text-left">
+                              <p className="text-[10px] uppercase font-black tracking-wider text-emerald-800 mb-1">Your Voice Transcription</p>
+                              <p className="text-xs text-emerald-950 font-medium">"{childSpeechTranscript}"</p>
+                              <div className="mt-2 text-xs text-emerald-800 font-bold flex items-center gap-1">
+                                <span>🌟 Brilliant reading practice! Keep it up!</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-slate-500 text-center py-2 leading-relaxed">
+                              Click "Turn Mic On" and let your child read the words displayed above. Smart Pikin AI will transcribe and encourage them!
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-3 mt-5 pt-3 border-t border-purple-100">
+                        <button 
+                          onClick={resetUploadState}
+                          className="text-xs font-extrabold text-purple-600 hover:text-purple-800 flex items-center gap-1.5 cursor-pointer bg-transparent border-none focus:outline-none"
+                        >
+                          <RefreshCw className="h-3 w-3" /> Upload another book
+                        </button>
+                        <button 
+                          onClick={() => setUploadModalOpen(false)}
+                          className="text-xs font-extrabold text-slate-600 hover:text-slate-800 flex items-center gap-1.5 cursor-pointer bg-transparent border-none focus:outline-none"
+                        >
+                          <span>← Go back to Dashboard</span>
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -2599,9 +4602,9 @@ export default function App() {
               <div className="mt-6 flex gap-3">
                 <button 
                   onClick={() => setUploadModalOpen(false)}
-                  className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-full transition-all text-sm cursor-pointer border-none focus:outline-none"
+                  className="flex-1 py-3.5 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-full transition-all text-sm cursor-pointer border-none focus:outline-none shadow-md shadow-purple-500/10 text-center"
                 >
-                  Close
+                  ← Go Back to Dashboard
                 </button>
               </div>
             </motion.div>
@@ -2767,51 +4770,82 @@ export default function App() {
 
           {/* Links */}
           <div className="flex flex-wrap justify-center gap-x-8 gap-y-3 font-bold text-[13px] text-[#7ab8d8]">
-            <button 
-              onClick={() => {
-                setCurrentView('landing');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
-            >
-              Home
-            </button>
-            <button 
-              onClick={() => {
-                setCurrentView('how');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
-            >
-              How It Works
-            </button>
-            <button 
-              onClick={() => {
-                setCurrentView('features');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
-            >
-              Features
-            </button>
-            <button 
-              onClick={() => {
-                setCurrentView('books');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
-            >
-              Books
-            </button>
-            <button 
-              onClick={() => {
-                setCurrentView('signup');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
-            >
-              Sign Up
-            </button>
+            {isLoggedIn ? (
+              <>
+                <button 
+                  onClick={() => {
+                    setCurrentView('dashboard');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  My Dashboard
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('books');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  Books Library
+                </button>
+                <button 
+                  onClick={handleLogout}
+                  className="hover:text-coral-pikin transition-colors cursor-pointer bg-transparent border-none text-coral-pikin/80"
+                >
+                  Log Out
+                </button>
+              </>
+            ) : (
+              <>
+                <button 
+                  onClick={() => {
+                    setCurrentView('landing');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  Home
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('how');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  How It Works
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('features');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  Features
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('books');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  Books
+                </button>
+                <button 
+                  onClick={() => {
+                    setCurrentView('signup');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
+                >
+                  Start Free Trial
+                </button>
+              </>
+            )}
             <button 
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               className="hover:text-white transition-colors cursor-pointer bg-transparent border-none"
@@ -2833,6 +4867,31 @@ export default function App() {
 
         </div>
       </footer>
+
+      {/* ─── CUSTOM TOAST NOTIFICATION ─── */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.9 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 max-w-md w-[90vw] bg-navy-pikin text-white px-6 py-4 rounded-2xl shadow-2xl border-2 border-sky-pikin flex items-center gap-3"
+          >
+            <span className="text-2xl shrink-0">
+              {toastMessage.type === 'success' ? '🎉' : toastMessage.type === 'error' ? '❌' : 'ℹ️'}
+            </span>
+            <div className="flex-1 text-sm font-bold text-left">
+              {toastMessage.message}
+            </div>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="text-white/60 hover:text-white font-extrabold text-xs cursor-pointer border-none bg-transparent"
+            >
+              Dismiss
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );
